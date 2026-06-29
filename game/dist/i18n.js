@@ -201,6 +201,12 @@ const en = {
     "upgrade.maxed": "Max level reached",
     "upgrade.maxedShort": "MAX",
     "upgrade.needTech": "Needs Factory Tech",
+    "upgrade.toLevel": "Upgrade → Lvl {n}",
+    "upgrade.upgrading": "Upgrading…",
+    "errors.needBaseLevel": "Requires Command Center Lvl {lvl}",
+    "hud.level": "Lvl {n}",
+    "hud.range": "Range {n}",
+    "hud.damage": "Damage {n}",
     "research.title": "Research",
     "research.researching": "Researching:",
     "research.cancel": "Cancel research",
@@ -233,6 +239,7 @@ const en = {
     "toast.heroDown": "Hero down — respawning",
     "toast.heroReady": "Hero respawned",
     "toast.brownout": "Power shortage — production slowed",
+    "toast.upgradeComplete": "{name} upgraded to Lvl {lvl}",
     "help.title": "How to Play",
     "help.body": "Goal: destroy the enemy Command Center.\n\n" +
         "• Left-click to select, drag to box-select.\n" +
@@ -452,6 +459,12 @@ const ru = {
     "upgrade.maxed": "Достигнут максимум",
     "upgrade.maxedShort": "МАКС",
     "upgrade.needTech": "Нужна Заводская технология",
+    "upgrade.toLevel": "Улучшить → Ур. {n}",
+    "upgrade.upgrading": "Улучшение…",
+    "errors.needBaseLevel": "Требуется Командный центр ур. {lvl}",
+    "hud.level": "Ур. {n}",
+    "hud.range": "Радиус {n}",
+    "hud.damage": "Урон {n}",
     "research.title": "Исследования",
     "research.researching": "Исследуется:",
     "research.cancel": "Отменить исследование",
@@ -484,6 +497,7 @@ const ru = {
     "toast.heroDown": "Герой пал — возрождение",
     "toast.heroReady": "Герой возродился",
     "toast.brownout": "Нехватка энергии — производство замедлено",
+    "toast.upgradeComplete": "{name} улучшен до ур. {lvl}",
     "help.title": "Как играть",
     "help.body": "Цель: уничтожить вражеский Штаб.\n\n" +
         "• ЛКМ — выбрать, удерживание — рамка выбора.\n" +
@@ -703,6 +717,12 @@ const uz = {
     "upgrade.maxed": "Maksimal daraja",
     "upgrade.maxedShort": "MAKS",
     "upgrade.needTech": "Zavod texnologiyasi kerak",
+    "upgrade.toLevel": "Kuchaytirish → {n}-daraja",
+    "upgrade.upgrading": "Kuchaytirilmoqda…",
+    "errors.needBaseLevel": "Bosh shtab {lvl}-daraja boʻlishi kerak",
+    "hud.level": "{n}-daraja",
+    "hud.range": "Radius {n}",
+    "hud.damage": "Zarar {n}",
     "research.title": "Tadqiqot",
     "research.researching": "Tadqiq qilinmoqda:",
     "research.cancel": "Tadqiqotni bekor qilish",
@@ -735,6 +755,7 @@ const uz = {
     "toast.heroDown": "Qahramon halok boʻldi — tiklanmoqda",
     "toast.heroReady": "Qahramon tiklandi",
     "toast.brownout": "Quvvat yetishmovchiligi — ishlab chiqarish sekinlashdi",
+    "toast.upgradeComplete": "{name} {lvl}-darajaga koʻtarildi",
     "help.title": "Qanday oʻynash",
     "help.body": "Maqsad: dushman Bosh shtabini yoʻq qilish.\n\n" +
         "• Tanlash uchun chap tugma, ramka uchun sudrang.\n" +

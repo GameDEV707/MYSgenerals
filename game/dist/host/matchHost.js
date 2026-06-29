@@ -179,6 +179,8 @@ export class MatchHost {
         for (const e of w.entities) {
             if (e.dead)
                 continue;
+            if (e.inMine)
+                continue; // T30: miners working inside a mine are hidden from everyone
             if (e.owner === pid) {
                 entities.push(this.snapEntity(e, true));
                 continue;
@@ -274,6 +276,12 @@ export class MatchHost {
             }
             if (e.researching)
                 s.rs = { id: e.researching.id, progress: e.researching.progress, time: e.researching.time };
+            // T30: the building's level (CC / defensive tower) and any in-progress timed level upgrade,
+            // so the HUD can show the level pip, the grown range ring, and the upgrade progress bar.
+            if (e.isBuilding && e.level > 1)
+                s.lvl = e.level;
+            if (e.upgrading)
+                s.up = { to: e.upgrading.to, progress: e.upgrading.progress, time: e.upgrading.time };
             // T29: expose the extraction ETA for the owner's own resource mines (snapshot-only readout —
             // computed exactly like economySystem(); idle silver mine reports idle). Enemy mines never get
             // this (only the `mine` branch runs), so it stays fog-safe.

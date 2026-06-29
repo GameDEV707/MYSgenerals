@@ -1,6 +1,7 @@
 // MYS Generals — skirmish AI (spec §22). Plays via the same command pipeline as a human.
 import { NEUTRAL } from "./world.js";
 import { UNIT_DEFS } from "../data.js";
+import { CC_UPGRADE_COSTS } from "../constants.js";
 export class AIController {
     constructor(world, owner) {
         this.decisionTimer = 0;
@@ -37,10 +38,14 @@ export class AIController {
     }
     cc() { return this.world.entities.find((e) => e.owner === this.owner && e.type === "command_center" && !e.dead); }
     manageEconomy(p) {
-        // keep silver miners saturated: train miners if fewer than 5
+        // keep mines staffed: train miners up to the number of work slots we have (T30: every mine needs
+        // a miner inside). Silver mines hold 3 each; iron/gold/oil hold 1.
         const miners = this.ownedAny("miner").length;
+        const slots = this.owned("silver_mine").length * 3
+            + this.owned("iron_mine").length + this.owned("gold_mine").length
+            + this.ownedAny("oil_derrick").filter((e) => e.owner === this.owner).length;
         const cc = this.cc();
-        if (cc && miners < 5 && cc.queue.length === 0 && p.silver >= 5) {
+        if (cc && miners < Math.max(5, slots) && cc.queue.length === 0 && p.silver >= 5) {
             this.world.issue({ t: "train", building: cc.id, unit: "miner" });
         }
         // assign idle miners
@@ -77,11 +82,26 @@ export class AIController {
             this.build("gold_mine");
             return;
         }
-        if (!has("barracks") && p.gold >= 1 && p.iron >= 10 && p.silver >= 30) {
+        // T30: upgrade the Command Center to unlock the tech tree (Barracks/Cannon need L2; War
+        // Factory/Rocket need L3). Drive the level up once the economy basics are in place.
+        const cc = this.cc();
+        const baseLvl = cc ? cc.level : 1;
+        if (cc && !cc.upgrading && !cc.dead) {
+            const ccAfford = (lvl) => this.world.canAfford(p, CC_UPGRADE_COSTS[lvl - 1]);
+            if (baseLvl < 2 && has("power_plant") && this.owned("silver_mine").length >= 1 && ccAfford(baseLvl)) {
+                this.world.issue({ t: "upgradeBuilding", building: cc.id, kind: "level" });
+                return;
+            }
+            if (baseLvl === 2 && has("barracks") && ccAfford(baseLvl)) {
+                this.world.issue({ t: "upgradeBuilding", building: cc.id, kind: "level" });
+                return;
+            }
+        }
+        if (!has("barracks") && baseLvl >= 2 && p.gold >= 1 && p.iron >= 10 && p.silver >= 30) {
             this.build("barracks");
             return;
         }
-        if (!has("war_factory") && has("barracks") && p.gold >= 3 && p.iron >= 15 && p.silver >= 70) {
+        if (!has("war_factory") && baseLvl >= 3 && has("barracks") && p.gold >= 3 && p.iron >= 15 && p.silver >= 70) {
             this.build("war_factory");
             return;
         }
@@ -93,7 +113,7 @@ export class AIController {
             this.build("research_center");
             return;
         }
-        if (this.owned("rocket_tower").length < 1 && has("war_factory") && p.gold >= 1 && p.iron >= 18 && p.silver >= 55) {
+        if (this.owned("rocket_tower").length < 1 && baseLvl >= 3 && has("war_factory") && p.gold >= 1 && p.iron >= 18 && p.silver >= 55) {
             this.build("rocket_tower");
             return;
         }

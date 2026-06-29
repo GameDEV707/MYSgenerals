@@ -3,6 +3,7 @@
 // touches the authoritative sim, so it cannot render entities the host didn't send.
 import { NEUTRAL } from "../client/worldView.js";
 import { BUILDING_DEFS, MINE_EMBLEM_COLORS } from "../data.js";
+import { DEFENSE_RANGE_PER_LEVEL } from "../constants.js";
 const TERRAIN_COLORS = ["#3c5a3a", "#5a5048", "#26506b", "#6b6258"]; // grass, cliff, water, road
 const SHAPES = {
     miner: { type: "miner", chassis: "infantry", body: "roundsquare", arm: "none", glyph: "▲", combat: false, accent: false, skirt: false, recoil: false, dish: false, bodyScale: 1.0 },
@@ -354,6 +355,10 @@ export class Renderer {
         if (e.constructing) {
             this.bar(x, slots.secY, s, slots.barH, e.buildProgress, "#ffb020");
         }
+        else if (e.owner === this.world.me && e.upgrading) {
+            // T30: timed level-upgrade progress (Command Center / defensive tower), gold like a rank-up.
+            this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.upgrading.progress), "#ffd23f");
+        }
         else if (e.owner === this.world.me && e.queue.length > 0) {
             // on-map head-item production bar over the local player's producing buildings
             this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.queue[0].progress), "#38bdf8");
@@ -366,6 +371,25 @@ export class Renderer {
         if (e.owner === this.world.me && this.selection.has(e.id) && e.mineEta && !e.mineEta.idle) {
             const mc = MINE_EMBLEM_COLORS[e.type] || "#c9d1d9";
             this.drawMineRing(this.toX(e.pos.x), this.toY(e.pos.y), s * 0.62, e.mineEta.progress, mc);
+        }
+        // T30 Part B: when a defensive tower is selected, show how far it sees and fires — a bright
+        // attack-range ring (grown by its level) plus a faint vision ring, centred on the tile.
+        if (this.selection.has(e.id) && def.weapon && !def.produces && !def.isWall && !e.constructing) {
+            const atk = (def.weapon.range + (e.level - 1) * DEFENSE_RANGE_PER_LEVEL) * z;
+            this.drawRangeRing(this.toX(e.pos.x), this.toY(e.pos.y), def.vision * z, "rgba(120,180,255,0.18)");
+            this.drawRangeRing(this.toX(e.pos.x), this.toY(e.pos.y), atk, "rgba(255,90,70,0.5)");
+        }
+        // T30: building level pip (L2 / L3) for upgraded Command Centers and towers (own info).
+        if (e.level > 1) {
+            ctx.fillStyle = "#ffd23f";
+            ctx.strokeStyle = "#0b0f14";
+            ctx.lineWidth = 2;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 11px system-ui, sans-serif";
+            const px = this.toX(e.pos.x), py = slots.pipY;
+            ctx.strokeText("L" + e.level, px, py);
+            ctx.fillText("L" + e.level, px, py);
         }
         this.drawHpBar(e, s);
         if (this.selection.has(e.id))
@@ -760,6 +784,17 @@ export class Renderer {
     }
     // T29 Part B (optional cue): a thin progress ring around a selected own mine showing fill toward
     // the next extraction. Sweeps clockwise from the top in the mine's resource colour.
+    // T30 Part B: a defensive tower's reach ring (attack range / vision), drawn while it is selected.
+    drawRangeRing(cx, cy, r, color) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
     drawMineRing(cx, cy, r, progress, color) {
         const ctx = this.ctx;
         ctx.strokeStyle = "rgba(0,0,0,0.45)";

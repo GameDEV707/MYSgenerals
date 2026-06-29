@@ -162,6 +162,8 @@ select, input {
 .mine-eta .bar.mine-bar .fill { height: 100%; transition: width .15s; }
 /* T29 Part C: resource-coloured gem emblem on the Silver / Iron / Gold Mine build buttons. */
 .cmd .ic.mine-emblem { text-shadow: 0 0 2px #000, 0 0 1px #000; }
+/* T30 Part B: defensive-tower range/damage/level readout in the selection panel. */
+.selinfo .defstats { font-size: 12px; color: var(--accent-2); margin-top: 4px; }
 
 .minimap-wrap {
   position: absolute; right: 10px; bottom: 10px;

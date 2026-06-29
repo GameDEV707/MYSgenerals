@@ -2,6 +2,7 @@
 import { World, Entity, NEUTRAL } from "./world.js";
 import { BUILDING_DEFS, UNIT_DEFS } from "../data.js";
 import { BuildingId, UnitId, Vec2 } from "../types.js";
+import { CC_UPGRADE_COSTS } from "../constants.js";
 
 export class AIController {
   owner: number;
@@ -46,10 +47,14 @@ export class AIController {
   private cc(): Entity | undefined { return this.world.entities.find((e) => e.owner === this.owner && e.type === "command_center" && !e.dead); }
 
   private manageEconomy(p: World["players"][number]): void {
-    // keep silver miners saturated: train miners if fewer than 5
+    // keep mines staffed: train miners up to the number of work slots we have (T30: every mine needs
+    // a miner inside). Silver mines hold 3 each; iron/gold/oil hold 1.
     const miners = this.ownedAny("miner").length;
+    const slots = this.owned("silver_mine").length * 3
+      + this.owned("iron_mine").length + this.owned("gold_mine").length
+      + this.ownedAny("oil_derrick").filter((e) => e.owner === this.owner).length;
     const cc = this.cc();
-    if (cc && miners < 5 && cc.queue.length === 0 && p.silver >= 5) {
+    if (cc && miners < Math.max(5, slots) && cc.queue.length === 0 && p.silver >= 5) {
       this.world.issue({ t: "train", building: cc.id, unit: "miner" });
     }
     // assign idle miners
@@ -73,11 +78,24 @@ export class AIController {
     if (this.owned("silver_mine").length < 2 && p.silver >= 15) { this.build("silver_mine"); return; }
     if (!has("iron_mine") && p.silver >= 20) { this.build("iron_mine"); return; }
     if (!has("gold_mine") && p.iron >= 5 && p.silver >= 25) { this.build("gold_mine"); return; }
-    if (!has("barracks") && p.gold >= 1 && p.iron >= 10 && p.silver >= 30) { this.build("barracks"); return; }
-    if (!has("war_factory") && has("barracks") && p.gold >= 3 && p.iron >= 15 && p.silver >= 70) { this.build("war_factory"); return; }
+    // T30: upgrade the Command Center to unlock the tech tree (Barracks/Cannon need L2; War
+    // Factory/Rocket need L3). Drive the level up once the economy basics are in place.
+    const cc = this.cc();
+    const baseLvl = cc ? cc.level : 1;
+    if (cc && !cc.upgrading && !cc.dead) {
+      const ccAfford = (lvl: number) => this.world.canAfford(p, CC_UPGRADE_COSTS[lvl - 1]);
+      if (baseLvl < 2 && has("power_plant") && this.owned("silver_mine").length >= 1 && ccAfford(baseLvl)) {
+        this.world.issue({ t: "upgradeBuilding", building: cc.id, kind: "level" }); return;
+      }
+      if (baseLvl === 2 && has("barracks") && ccAfford(baseLvl)) {
+        this.world.issue({ t: "upgradeBuilding", building: cc.id, kind: "level" }); return;
+      }
+    }
+    if (!has("barracks") && baseLvl >= 2 && p.gold >= 1 && p.iron >= 10 && p.silver >= 30) { this.build("barracks"); return; }
+    if (!has("war_factory") && baseLvl >= 3 && has("barracks") && p.gold >= 3 && p.iron >= 15 && p.silver >= 70) { this.build("war_factory"); return; }
     if (this.owned("guard_tower").length < 1 && has("barracks") && p.iron >= 8 && p.silver >= 25) { this.build("guard_tower"); return; }
     if (!has("research_center") && has("war_factory") && p.gold >= 2 && p.iron >= 20 && p.silver >= 60) { this.build("research_center"); return; }
-    if (this.owned("rocket_tower").length < 1 && has("war_factory") && p.gold >= 1 && p.iron >= 18 && p.silver >= 55) { this.build("rocket_tower"); return; }
+    if (this.owned("rocket_tower").length < 1 && baseLvl >= 3 && has("war_factory") && p.gold >= 1 && p.iron >= 18 && p.silver >= 55) { this.build("rocket_tower"); return; }
     if (this.owned("guard_tower").length < 3 && has("war_factory") && p.iron >= 8 && p.silver >= 25) { this.build("guard_tower"); return; }
     // keep expanding economy when flush
     if (p.silver >= 60 && this.owned("silver_mine").length < 3) { this.build("silver_mine"); return; }

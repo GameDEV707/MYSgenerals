@@ -30,19 +30,28 @@ console.log("A silver mine's countdown scales with the number of working miners 
   assert(mineEta("silver_mine", 0, 5).idle === false, "a capped/over-full silver mine is not idle");
 }
 
-console.log("Iron and gold mines count down on their fixed intervals (no miners needed):");
+console.log("Iron and gold mines (T30: need a miner inside) count down on their fixed intervals when occupied:");
 {
-  assert(near(mineEta("iron_mine", 0, 0).seconds, IRON_INTERVAL), "iron from empty → 15s");
-  assert(mineEta("iron_mine", 0, 0).resource === "iron" && mineEta("iron_mine", 0, 0).idle === false, "iron yields iron, never idle");
-  assert(near(mineEta("gold_mine", 0, 0).seconds, GOLD_INTERVAL), "gold from empty → 30s");
-  assert(mineEta("gold_mine", 0, 0).resource === "gold", "gold yields gold");
+  assert(near(mineEta("iron_mine", 0, 1).seconds, IRON_INTERVAL), "iron (occupied) from empty → 15s");
+  assert(mineEta("iron_mine", 0, 1).resource === "iron" && mineEta("iron_mine", 0, 1).idle === false, "iron yields iron when occupied");
+  assert(near(mineEta("gold_mine", 0, 1).seconds, GOLD_INTERVAL), "gold (occupied) from empty → 30s");
+  assert(mineEta("gold_mine", 0, 1).resource === "gold", "gold yields gold");
 }
 
-console.log("A captured oil derrick yields silver on the oil interval:");
+console.log("T30: every mine (iron/gold/oil too) is idle with NO miner inside (no output):");
 {
-  const e = mineEta("oil_derrick", 0, 0);
-  assert(near(e.seconds, OIL_INTERVAL), "oil from empty → 5s");
-  assert(e.resource === "silver" && e.idle === false, "oil yields silver, never idle");
+  assert(mineEta("iron_mine", 0, 0).idle === true && mineEta("iron_mine", 0, 0).seconds === null, "iron with 0 miners → idle");
+  assert(mineEta("gold_mine", 0, 0).idle === true && mineEta("gold_mine", 0, 0).seconds === null, "gold with 0 miners → idle");
+  assert(mineEta("oil_derrick", 0, 0).idle === true && mineEta("oil_derrick", 0, 0).seconds === null, "captured oil with 0 miners → idle");
+  // resource is still reported while idle so the UI can colour the hint
+  assert(mineEta("iron_mine", 0, 0).resource === "iron" && mineEta("gold_mine", 0, 0).resource === "gold", "idle mines still report their resource");
+}
+
+console.log("A captured oil derrick (occupied) yields silver on the oil interval:");
+{
+  const e = mineEta("oil_derrick", 0, 1);
+  assert(near(e.seconds, OIL_INTERVAL), "oil (occupied) from empty → 5s");
+  assert(e.resource === "silver" && e.idle === false, "oil yields silver when occupied");
 }
 
 console.log("The countdown shrinks as resAccum rises toward the next unit (across all mine types):");
@@ -58,9 +67,9 @@ for (const type of ["silver_mine", "iron_mine", "gold_mine", "oil_derrick"]) {
 
 console.log("resAccum is clamped (defensive) and non-mine types return null:");
 {
-  assert(mineEta("iron_mine", 1.5, 0).seconds <= 0 + 1e-9, "resAccum > 1 clamps to 0s remaining");
-  assert(mineEta("iron_mine", -1, 0).seconds <= IRON_INTERVAL + 1e-9, "negative resAccum clamps to full interval");
-  assert(mineEta("barracks", 0.4, 0) === null, "a non-mine building → null");
+  assert(mineEta("iron_mine", 1.5, 1).seconds <= 0 + 1e-9, "resAccum > 1 clamps to 0s remaining");
+  assert(mineEta("iron_mine", -1, 1).seconds <= IRON_INTERVAL + 1e-9, "negative resAccum clamps to full interval");
+  assert(mineEta("barracks", 0.4, 1) === null, "a non-mine building → null");
   assert(mineEta("command_center", 0, 3) === null, "command center → null");
 }
 

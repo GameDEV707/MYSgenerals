@@ -62,6 +62,7 @@ Needs the TypeScript compiler (`npm install -g typescript`).
 | Train | Select a production building → click a unit |
 | Production queue | Select a producer → the queue strip shows order + progress; click a slot to cancel |
 | Factory upgrades | Select a Barracks / War Factory → **Production Bay** (build 2–3 at once) / **Assembly Speed** (+25% / +50%) |
+| Base & tower upgrades | Select the **Command Center** → **Upgrade → Lvl 2/3** (unlocks Barracks at L2, War Factory at L3). Select a **defensive tower** → **Upgrade → Lvl 2/3** (its range + damage grow; the selection shows its range ring) |
 | Research | Select the Research Center → start a global upgrade (needs a built Research Center) |
 | Keyboard build (P1) | In keyboard control, `1`–`0` activate the command-panel buttons; with a builder selected, **`Space`** moves across the build categories and **`E`** opens the highlighted one (`]` / `[` also cycle directly). The switch key is remappable in Settings → Keyboard |
 | Keyboard zoom (P1) | In keyboard control, **`Shift`** zooms in and **`Ctrl`** zooms out (remappable in Settings → Keyboard). The mouse player uses the wheel |
@@ -127,6 +128,32 @@ Enemy mines stay fog-hidden.
 
 The **Silver, Iron and Gold mines** now carry a **distinct resource-coloured emblem** — silver, iron and
 gold — both **on the map** and on the **build-menu buttons**, so the three are instantly tellable apart.
+
+## Base leveling, upgradeable defenses & worked mines
+
+**The Command Center levels up.** Select it and click **Upgrade → Lvl N** to raise the base to **Level 2**
+then **Level 3** (each costs resources and takes time — an upgrade is **half** the length of a build).
+The base level **gates the build tree**:
+
+| Command Center level | Unlocks |
+|---|---|
+| **Lvl 1** (start) | Mines, Power Plant, Research Center, **Guard Tower**, Wall |
+| **Lvl 2** | **Barracks** (infantry) + **Cannon Tower** |
+| **Lvl 3** | **War Factory** (tanks) + **Rocket Tower** |
+
+Locked buildings are greyed in the build menu with a *"Requires Command Center Lvl N"* hint and unlock
+the moment the base reaches that level.
+
+**Defenses are upgradeable (max Level 3).** Select a Guard / Cannon / Rocket Tower to see the **radius it
+sees and fires in** (a bright attack-range ring + a faint vision ring) and its **level · range · damage**.
+**Upgrade → Lvl N** raises its **range (+1 tile) and damage (+25%)** per level; the upgrade takes half the
+tower's build time, and a level pip (L2/L3) marks upgraded buildings on the map.
+
+**Every mine needs a miner working inside it.** A mine with no miner sits **idle** and produces nothing.
+Train a **Miner** at the Command Center (5 silver); it **automatically walks to a free mine, goes inside,
+and works** — disappearing from the map (it no longer loiters beside the mine). Silver mines hold up to 3
+miners (faster output); iron / gold / captured-oil mines need one. If a mine is destroyed, its miners are
+**released** back onto the map and re-assigned to the next free mine.
 
 ## Power
 
@@ -221,5 +248,8 @@ NODE_OPTIONS="" node test/zoom.mjs         # T28: Player-1 keyboard zoom (Shift/
 NODE_OPTIONS="" node test/heropanel.mjs    # T28: hero ability panel visible only when hero selected
 NODE_OPTIONS="" node test/mineeta.mjs      # T29: mine extraction ETA helper (silver slots / iron / gold / oil; idle)
 NODE_OPTIONS="" node test/placement.mjs    # T29: placement-visibility predicate + Cancel-build clears r.placing
+NODE_OPTIONS="" node test/basetech.mjs     # T30: Command-Center level gates the build tree (Barracks L2, War Factory L3)
+NODE_OPTIONS="" node test/upgrades.mjs     # T30: CC + defensive-tower level upgrades (half build time, +range/+damage, capped)
+NODE_OPTIONS="" node test/minework.mjs     # T30: worked-mine economy — unmanned = idle; miner enters/hides; release on death
 ```
 

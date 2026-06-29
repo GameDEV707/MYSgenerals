@@ -1,5 +1,5 @@
 import { BUILDING_DEFS, UNIT_DEFS, BUILD_MENU, RESEARCH_DEFS, RESEARCH_BY_ID, MINE_EMBLEM_COLORS, RESOURCE_COLORS } from "../data.js";
-import { MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, powerStatus } from "../constants.js";
+import { MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, powerStatus, MAX_BASE_LEVEL, MAX_DEFENSE_LEVEL, REQUIRED_BASE_LEVEL, DEFENSE_RANGE_PER_LEVEL, DEFENSE_DAMAGE_PER_LEVEL, defenseUpgradeCost, CC_UPGRADE_COSTS } from "../constants.js";
 import { t, onLangChange } from "../i18n.js";
 import { loadHudLayout, saveHudLayout, clearHudLayout } from "./hudLayout.js";
 import { getKeyBindings, keyLabel } from "./keyBindings.js";
@@ -190,7 +190,11 @@ export class HUD {
         if (!minerPanel && this.catFocus >= 0)
             this.catFocus = -1;
         const kb = this.input.control === "p1-keyboard" ? "K" : "";
-        let sig = own.map((e) => e.id + e.type).join(",") + "|" + this.tab + "|" + kb + (miner ? "m" : "") + "|F" + this.catFocus;
+        // T30: include each own building's level + whether it is upgrading (NOT progress — the live bar
+        // is drawn on the map), and the player's base level (drives the build-menu locks), so the panel
+        // rebuilds when the CC levels up or a tower upgrade completes/starts.
+        let sig = own.map((e) => e.id + e.type + ":" + e.level + (e.upgrading ? "U" + e.upgrading.to : "")).join(",")
+            + "|" + this.tab + "|" + kb + (miner ? "m" : "") + "|F" + this.catFocus + "|BL" + this.baseLevel();
         if (prod)
             sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".");
         if (research) {
@@ -281,7 +285,12 @@ export class HUD {
         </div>`;
         }
         if (own.some((e) => e.kind === "building")) {
-            return `<h4>${t(BUILDING_DEFS[own[0].type].nameKey)}</h4>
+            const b0 = own[0];
+            const def0 = BUILDING_DEFS[b0.type];
+            // T30 Part B: a defensive tower gets an upgrade button + a range/damage/level readout.
+            if (def0.weapon && !def0.produces && !def0.isWall)
+                return this.defensePanelHtml(b0);
+            return `<h4>${t(def0.nameKey)}</h4>
         <div class="grid"><div class="cmd" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div></div>`;
         }
         return `<h4>MYS Generals</h4><div style="font-size:12px;color:var(--text-dim)">${t("menu.singlePlayer")}</div>`;
@@ -291,10 +300,42 @@ export class HUD {
         const def = BUILDING_DEFS[prod.type];
         const trainBtns = (def.produces || []).map((u) => this.unitBtn(u)).join("");
         const upBtns = this.upgradeBtns(prod);
-        return `<h4>${t(def.nameKey)} — ${t("cat.train")}</h4>
-      <div class="grid">${trainBtns}${upBtns}</div>
+        // T30 Part A: the Command Center also carries its level-upgrade button (unlocks the build tree).
+        const lvlBtn = prod.type === "command_center" ? this.levelUpBtn(prod, MAX_BASE_LEVEL) : "";
+        return `<h4>${t(def.nameKey)} — ${t("cat.train")}${prod.type === "command_center" ? ` · ${t("hud.level", { n: prod.level })}` : ""}</h4>
+      <div class="grid">${trainBtns}${upBtns}${lvlBtn}</div>
       <div class="qrow"><span class="dimtxt">${t("cmd.rally")}: ${prod.rally ? "✓" : "—"}</span></div>
       ${this.queueStripHtml(prod)}`;
+    }
+    // T30 Part B: the defensive-tower panel — a level-upgrade button (range + damage grow per level),
+    // a live range/damage/level readout, and Sell.
+    defensePanelHtml(b) {
+        const def = BUILDING_DEFS[b.type];
+        const range = (def.weapon.range + (b.level - 1) * DEFENSE_RANGE_PER_LEVEL).toFixed(0);
+        const dmg = Math.round(def.weapon.damage * (1 + DEFENSE_DAMAGE_PER_LEVEL * (b.level - 1)));
+        return `<h4>${t(def.nameKey)} · ${t("hud.level", { n: b.level })}</h4>
+      <div class="defstats">${t("hud.range", { n: range })} · ${t("hud.damage", { n: dmg })}</div>
+      <div class="grid">
+        ${this.levelUpBtn(b, MAX_DEFENSE_LEVEL)}
+        <div class="cmd" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div>
+      </div>`;
+    }
+    // A timed level-upgrade button shared by the Command Center and defensive towers. Disabled while
+    // an upgrade is running (shows "Upgrading…") or once the max level is reached.
+    levelUpBtn(b, maxLvl) {
+        if (b.upgrading) {
+            return `<div class="cmd gridbtn upgrade disabled" title="${t("upgrade.upgrading")}">
+        <span class="ic">▲</span><span>${t("upgrade.upgrading")}</span><span class="cost">→ ${t("hud.level", { n: b.upgrading.to })}</span></div>`;
+        }
+        if (b.level >= maxLvl) {
+            return `<div class="cmd gridbtn upgrade disabled" title="${t("upgrade.maxed")}">
+        <span class="ic">▲</span><span>${t("upgrade.toLevel", { n: b.level })}</span><span class="cost">${t("upgrade.maxedShort")}</span></div>`;
+        }
+        const cost = b.type === "command_center"
+            ? CC_UPGRADE_COSTS[b.level - 1]
+            : defenseUpgradeCost(BUILDING_DEFS[b.type].cost);
+        return `<div class="cmd gridbtn upgrade" data-act="upgrade" data-kind="level" data-cost='${JSON.stringify(cost)}' title="${t("upgrade.toLevel", { n: b.level + 1 })}">
+      <span class="ic">▲</span><span>${t("upgrade.toLevel", { n: b.level + 1 })}</span><span class="cost">${this.costStr(cost)}</span></div>`;
     }
     // The Research Center panel (replaces the bare Sell view): timed-research catalog, or the active
     // research with a progress bar + cancel button while one is running (spec §24 → T26 Part C).
@@ -390,8 +431,16 @@ export class HUD {
         const icon = mineColor
             ? `<span class="ic mine-emblem" style="color:${mineColor}">◆</span>`
             : `<span class="ic">${d.icon}</span>`;
-        return `<div class="cmd gridbtn" data-act="build" data-b="${b}" data-cost='${JSON.stringify(d.cost)}' title="${t(d.nameKey)}">
-      ${icon}<span>${t(d.nameKey)}</span><span class="cost">${this.costStr(d.cost)}</span></div>`;
+        // T30 Part A: lock buildings whose required Command-Center level the player has not reached;
+        // grey them out with a "requires Lvl N" tooltip and do not arm placement until they unlock.
+        const reqLvl = REQUIRED_BASE_LEVEL[b] ?? 1;
+        const locked = reqLvl > this.baseLevel();
+        const lockCls = locked ? " disabled locked" : "";
+        const lockAttr = locked ? ` data-locked="1"` : "";
+        const title = locked ? t("errors.needBaseLevel", { lvl: reqLvl }) : t(d.nameKey);
+        const sub = locked ? t("errors.needBaseLevel", { lvl: reqLvl }) : this.costStr(d.cost);
+        return `<div class="cmd gridbtn${lockCls}" data-act="build" data-b="${b}"${lockAttr} data-cost='${JSON.stringify(d.cost)}' title="${title}">
+      ${icon}<span>${t(d.nameKey)}</span><span class="cost">${sub}</span></div>`;
     }
     unitBtn(u) {
         const d = UNIT_DEFS[u];
@@ -402,6 +451,10 @@ export class HUD {
     updateAffordability(panel) {
         const p = this.me();
         panel.querySelectorAll(".cmd[data-cost]").forEach((btn) => {
+            if (btn.dataset.locked) {
+                btn.classList.add("disabled");
+                return;
+            } // T30: keep base-level locks greyed
             try {
                 const c = JSON.parse(btn.dataset.cost || "{}");
                 const ok = p.silver >= (c.silver ?? 0) && p.iron >= (c.iron ?? 0) && p.gold >= (c.gold ?? 0);
@@ -426,6 +479,10 @@ export class HUD {
         const me = this.world.me;
         const act = el.dataset.act;
         if (act === "build") {
+            if (el.dataset.locked) {
+                this.audio.play("deny");
+                return;
+            } // T30: base-level-locked → no placement
             this.input.setPlacing(el.dataset.b);
             this.audio.play("click");
             return;
@@ -436,9 +493,11 @@ export class HUD {
             return;
         }
         if (act === "upgrade") {
-            const b = this.selectedProd();
+            const kind = el.dataset.kind;
+            // T30: a level upgrade applies to the Command Center or a defensive tower (not just producers).
+            const b = kind === "level" ? this.selectedUpgradable() : this.selectedProd();
             if (b)
-                this.world.send({ t: "upgradeBuilding", building: b.id, kind: el.dataset.kind });
+                this.world.send({ t: "upgradeBuilding", building: b.id, kind });
             this.audio.play("click");
             return;
         }
@@ -483,6 +542,25 @@ export class HUD {
     }
     selectedResearch() {
         return this.selectedEntities().find((e) => e.owner === this.world.me && e.type === "research_center");
+    }
+    // T30: the player's highest own Command-Center level (gates the build menu). Defaults to 1.
+    baseLevel() {
+        let lvl = 1;
+        for (const e of this.world.entities) {
+            if (e.owner === this.world.me && e.type === "command_center" && !e.constructing && e.level > lvl)
+                lvl = e.level;
+        }
+        return lvl;
+    }
+    // T30: the selected own building that can take a LEVEL upgrade — the Command Center or a
+    // defensive tower (weapon, not a producer, not a wall).
+    selectedUpgradable() {
+        return this.selectedEntities().find((e) => {
+            if (e.owner !== this.world.me || e.kind !== "building")
+                return false;
+            const def = BUILDING_DEFS[e.type];
+            return e.type === "command_center" || (!!def.weapon && !def.produces && !def.isWall);
+        });
     }
     // T26 Part E: a digit key activates the Nth grid action button (in visible order).
     activatePanelDigit(index) {
@@ -570,6 +648,18 @@ export class HUD {
         // next +1 (or an "assign miners" hint for an idle silver mine) plus which resource it yields.
         if (e.owner === this.world.me && e.mineEta)
             extra += this.mineEtaHtml(e.mineEta);
+        // T30 Part B: a defensive tower shows its level + the radius it sees/fires in and its damage.
+        if (e.kind === "building") {
+            const bdef = BUILDING_DEFS[e.type];
+            if (bdef.weapon && !bdef.produces && !bdef.isWall) {
+                const range = (bdef.weapon.range + (e.level - 1) * DEFENSE_RANGE_PER_LEVEL).toFixed(0);
+                const dmg = Math.round(bdef.weapon.damage * (1 + DEFENSE_DAMAGE_PER_LEVEL * (e.level - 1)));
+                extra += `<div class="defstats">${t("hud.level", { n: e.level })} · ${t("hud.range", { n: range })} · ${t("hud.damage", { n: dmg })}</div>`;
+            }
+            else if (e.level > 1) {
+                extra += `<div class="defstats">${t("hud.level", { n: e.level })}</div>`;
+            }
+        }
         box.innerHTML = `<div class="name">${name} ${chev}</div>
       <div class="bar"><div class="fill" style="width:${Math.max(0, e.hp / e.maxHp * 100)}%"></div></div>
       <div style="font-size:12px;color:var(--text-dim)">HP ${Math.ceil(e.hp)}/${e.maxHp}</div>

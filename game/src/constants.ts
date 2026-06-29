@@ -59,6 +59,50 @@ export function powerStatus(gen: number, use: number): PowerStatus {
   return "ok";
 }
 
+// ---- T30: Command Center leveling + tech-gated build tree (spec §24 → T30 Part A) ----
+// Starting balance (tunable in T21). The base starts at Level 1 and can be upgraded twice.
+export const MAX_BASE_LEVEL = 3;
+// Cost indexed by the level being LEFT (0 = L1→L2, 1 = L2→L3).
+export const CC_UPGRADE_COSTS: Cost[] = [
+  { silver: 80, iron: 15 },           // L1 → L2
+  { gold: 2, silver: 150, iron: 30 }, // L2 → L3
+];
+// Timed upgrade durations (seconds), same indexing. These are explicit (the CC has no buildTime).
+export const CC_UPGRADE_TIMES = [20, 30];
+// Minimum Command-Center level required to BUILD each building (default 1 when absent). Barracks +
+// Cannon Tower need L2; War Factory + Rocket Tower need L3. Everything else is available at L1.
+export const REQUIRED_BASE_LEVEL: Record<string, number> = {
+  barracks: 2, cannon_tower: 2,
+  war_factory: 3, rocket_tower: 3,
+};
+
+// ---- T30: upgradeable defenses (spec §24 → T30 Part B) ----
+export const MAX_DEFENSE_LEVEL = 3;             // towers upgrade 1 → 2 → 3
+export const DEFENSE_RANGE_PER_LEVEL = 1;       // +1 tile range per level above 1
+export const DEFENSE_DAMAGE_PER_LEVEL = 0.25;   // +25% weapon damage per level above 1
+export const DEFENSE_UPGRADE_COST_FRAC = 0.75;  // each upgrade ≈ 75% of the base build cost
+// Cost of one defense upgrade: 75% of the building's base build cost (rounded), per step.
+export function defenseUpgradeCost(base: Cost): Cost {
+  const scale = (n?: number) => (n ? Math.max(1, Math.round(n * DEFENSE_UPGRADE_COST_FRAC)) : undefined);
+  const out: Cost = {};
+  if (base.silver) out.silver = scale(base.silver);
+  if (base.iron) out.iron = scale(base.iron);
+  if (base.gold) out.gold = scale(base.gold);
+  return out;
+}
+// The canonical T30 rule: a level upgrade takes HALF the time a comparable build would.
+export function upgradeTime(buildTime: number): number { return Math.max(1, Math.ceil(buildTime / 2)); }
+
+// ---- T30: worked-mine economy (spec §24 → T30 Part C) ----
+// Work slots per mine type: silver scales with miners up to its canonical cap; iron/gold/oil need
+// exactly one miner working inside. A mine with zero occupancy produces nothing.
+export function mineSlotCap(type: string): number {
+  return type === "silver_mine" ? SILVER_MINE_SLOTS : 1;
+}
+export function isMineType(type: string): boolean {
+  return type === "silver_mine" || type === "iron_mine" || type === "gold_mine" || type === "oil_derrick";
+}
+
 // ---- T29: resource-mine extraction ETA (pure; shared by the host snapshot + the headless test) ----
 // The economy emits +1 of a mine's resource whenever its `resAccum` (0..1 fill toward the next unit)
 // reaches 1. This mirrors `World.economySystem()`:
@@ -69,11 +113,14 @@ export function powerStatus(gen: number, use: number): PowerStatus {
 //   • oil_derrick — captured derrick: yields silver at `1 / OIL_INTERVAL` per second.
 // `seconds` is the time until the next +1 (null when idle), `progress` the 0..1 fill toward it, and
 // `resource` which resource is produced. Returns null for any non-mine type.
+// T30 update: EVERY mine now needs a miner working inside it — iron/gold/oil also report idle (no
+// countdown) when their occupancy (`minerSlots`) is zero, mirroring the worked-mine economy.
 export type MineType = "silver_mine" | "iron_mine" | "gold_mine" | "oil_derrick";
 export interface MineEta { seconds: number | null; progress: number; resource: ResKind; idle: boolean; }
 export function mineEta(type: string, resAccum: number, minerSlots: number): MineEta | null {
   const accum = Math.max(0, Math.min(1, resAccum));
   const remain = 1 - accum;
+  const occupied = Math.max(0, minerSlots) > 0;
   switch (type) {
     case "silver_mine": {
       const slots = Math.min(Math.max(0, minerSlots), SILVER_MINE_SLOTS);
@@ -81,9 +128,15 @@ export function mineEta(type: string, resAccum: number, minerSlots: number): Min
       const ratePerSec = slots / MINER_OUTPUT_INTERVAL; // +1 every MINER_OUTPUT_INTERVAL per miner
       return { seconds: remain / ratePerSec, progress: accum, resource: "silver", idle: false };
     }
-    case "iron_mine": return { seconds: remain * IRON_INTERVAL, progress: accum, resource: "iron", idle: false };
-    case "gold_mine": return { seconds: remain * GOLD_INTERVAL, progress: accum, resource: "gold", idle: false };
-    case "oil_derrick": return { seconds: remain * OIL_INTERVAL, progress: accum, resource: "silver", idle: false };
+    case "iron_mine":
+      if (!occupied) return { seconds: null, progress: 0, resource: "iron", idle: true };
+      return { seconds: remain * IRON_INTERVAL, progress: accum, resource: "iron", idle: false };
+    case "gold_mine":
+      if (!occupied) return { seconds: null, progress: 0, resource: "gold", idle: true };
+      return { seconds: remain * GOLD_INTERVAL, progress: accum, resource: "gold", idle: false };
+    case "oil_derrick":
+      if (!occupied) return { seconds: null, progress: 0, resource: "silver", idle: true };
+      return { seconds: remain * OIL_INTERVAL, progress: accum, resource: "silver", idle: false };
     default: return null;
   }
 }

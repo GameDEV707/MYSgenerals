@@ -1,5 +1,5 @@
 import { UNIT_DEFS, BUILDING_DEFS, damageMultiplier, RESEARCH_BY_ID } from "../data.js";
-import { TICK_DT, MINER_OUTPUT_INTERVAL, SILVER_MINE_SLOTS, IRON_INTERVAL, GOLD_INTERVAL, OIL_INTERVAL, BROWNOUT_PRODUCTION_MULT, BROWNOUT_TOWER_FIRE_MULT, BROWNOUT_TOWER_RANGE_MULT, SELL_REFUND, CANCEL_QUEUED_REFUND, CANCEL_INPROGRESS_REFUND, BUILD_RADIUS, MAX_QUEUE, HERO_RESPAWN_BASE, HERO_RESPAWN_PER_LEVEL, HERO_XP_PER_LEVEL, HERO_PASSIVE_XP, HERO_MAX_LEVEL, VET_THRESHOLDS, MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, RESEARCH_DAMAGE_PER_LEVEL, RESEARCH_ARMOR_PER_LEVEL, LOGISTICS_BUILD_MULT, } from "../constants.js";
+import { TICK_DT, MINER_OUTPUT_INTERVAL, SILVER_MINE_SLOTS, IRON_INTERVAL, GOLD_INTERVAL, OIL_INTERVAL, BROWNOUT_PRODUCTION_MULT, BROWNOUT_TOWER_FIRE_MULT, BROWNOUT_TOWER_RANGE_MULT, SELL_REFUND, CANCEL_QUEUED_REFUND, CANCEL_INPROGRESS_REFUND, BUILD_RADIUS, MAX_QUEUE, HERO_RESPAWN_BASE, HERO_RESPAWN_PER_LEVEL, HERO_XP_PER_LEVEL, HERO_PASSIVE_XP, HERO_MAX_LEVEL, VET_THRESHOLDS, MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, RESEARCH_DAMAGE_PER_LEVEL, RESEARCH_ARMOR_PER_LEVEL, LOGISTICS_BUILD_MULT, MAX_BASE_LEVEL, CC_UPGRADE_COSTS, CC_UPGRADE_TIMES, REQUIRED_BASE_LEVEL, MAX_DEFENSE_LEVEL, DEFENSE_RANGE_PER_LEVEL, DEFENSE_DAMAGE_PER_LEVEL, defenseUpgradeCost, upgradeTime, mineSlotCap, isMineType, } from "../constants.js";
 import { NavGrid, findPath, nearestFree } from "./grid.js";
 export const NEUTRAL = -1;
 export class Entity {
@@ -37,10 +37,17 @@ export class Entity {
         // T26: factory upgrades — parallel build bays (1..MAX_BAYS) and assembly-speed level (0..MAX_SPEED_LEVEL).
         this.bays = 1;
         this.speedLevel = 0;
+        // T30: building level (Command Center 1..3 gates the build tree; defensive towers 1..3 boost
+        // range + damage). A timed level upgrade in progress is tracked in `upgrading` (null = idle).
+        this.level = 1;
+        this.upgrading = null;
         // T26: Research Center active timed research slot (null = idle).
         this.researching = null;
         this.resAccum = 0; // for mines
-        this.minerSlots = 0; // miners assigned (silver mine)
+        this.minerSlots = 0; // miners working inside this mine (occupancy; T30: all mine types)
+        // T30: a miner that has entered a mine to work — hidden from the map (not drawn / selectable /
+        // collidable / targetable). It still exists in the sim so it can be released if the mine dies.
+        this.inMine = false;
         this.power = 0;
         // neutral
         this.captureProgress = 0;
@@ -147,11 +154,13 @@ export class World {
     spawnBase(owner, spawn) {
         const cc = this.spawn("building", "command_center", owner, spawn.x, spawn.y);
         cc.constructing = false;
-        // adjacent silver mine with 1 working miner (spec §6.2)
+        // adjacent silver mine with 1 miner already working INSIDE it (spec §6.2; T30: miners work inside)
         const mine = this.spawn("building", "silver_mine", owner, spawn.x + 4, spawn.y);
         const miner = this.spawn("unit", "miner", owner, spawn.x + 4, spawn.y + 3);
         miner.mineId = mine.id;
         miner.mining = true;
+        miner.inMine = true;
+        miner.pos = { x: mine.pos.x, y: mine.pos.y };
         mine.minerSlots = 1;
         // hero
         const hero = this.spawn("unit", "hero", owner, spawn.x + 2, spawn.y + 2);
@@ -253,14 +262,15 @@ export class World {
                 break;
             case "mine": {
                 const mine = this.byId.get(cmd.target);
-                if (!mine || mine.type !== "silver_mine")
-                    break;
+                if (!mine || !isMineType(mine.type))
+                    break; // T30: any mine type (silver/iron/gold/captured oil)
                 for (const id of cmd.ids) {
                     const e = this.byId.get(id);
                     if (!e || !e.isWorker || e.type !== "miner")
                         continue;
                     e.mineId = mine.id;
                     e.mining = false;
+                    e.inMine = false;
                     e.buildTask = null;
                     this.setMove(e, mine.pos.x, mine.pos.y);
                 }
@@ -328,6 +338,17 @@ export class World {
             e.path = [{ x: x + 0, y: y + 0 }];
         }
     }
+    // T30: the owner's highest Command-Center level (gates the build tree). Defaults to 1.
+    maxBaseLevel(owner) {
+        let lvl = 1;
+        for (const e of this.entities) {
+            if (e.dead || e.owner !== owner || e.type !== "command_center" || e.constructing)
+                continue;
+            if (e.level > lvl)
+                lvl = e.level;
+        }
+        return lvl;
+    }
     tryBuild(cmd) {
         const p = this.players[cmd.owner];
         if (!p)
@@ -339,6 +360,13 @@ export class World {
         }
         if (def.requires && !this.entities.some((e) => e.owner === cmd.owner && e.type === def.requires && !e.constructing)) {
             this.events.push({ e: "toast", key: "errors.needBuilding", kind: "danger", params: { b: BUILDING_DEFS[def.requires].nameKey }, to: cmd.owner });
+            return;
+        }
+        // T30 Part A: the Command Center level gates the build tree (Barracks/Cannon need L2, War
+        // Factory/Rocket need L3). Reject authoritatively with a clear toast naming the required level.
+        const reqLvl = REQUIRED_BASE_LEVEL[cmd.building] ?? 1;
+        if (reqLvl > 1 && this.maxBaseLevel(cmd.owner) < reqLvl) {
+            this.events.push({ e: "toast", key: "errors.needBaseLevel", kind: "danger", params: { lvl: reqLvl }, to: cmd.owner });
             return;
         }
         if (!this.placementValid(cmd.owner, cmd.building, cmd.x, cmd.y)) {
@@ -461,11 +489,17 @@ export class World {
         if (!b || !b.isBuilding || b.constructing)
             return;
         const def = BUILDING_DEFS[b.type];
-        if (!def.produces)
-            return; // only producing buildings can be upgraded
         const p = this.players[b.owner];
         if (!p)
             return;
+        // T30: timed LEVEL upgrade for the Command Center (gates the tech tree) and defensive towers
+        // (boost range + damage). Costs are paid up-front and the upgrade takes half the build time.
+        if (kind === "level") {
+            this.tryUpgradeLevel(b, def, p);
+            return;
+        }
+        if (!def.produces)
+            return; // only producing buildings can take bay/speed upgrades
         if (kind === "bay") {
             if (b.bays >= MAX_BAYS)
                 return;
@@ -498,6 +532,29 @@ export class World {
             this.pay(p, cost);
             b.speedLevel++;
         }
+        this.events.push({ e: "float", pos: b.pos, text: "▲", color: "#ffd23f" });
+    }
+    // T30: a timed level upgrade for the Command Center (max L3, gates the build tree) or a defensive
+    // tower (max L3, +range/+damage per level). Validated host-side: right building type, not maxed,
+    // not already upgrading, affordable. The new level applies when the timer completes.
+    tryUpgradeLevel(b, def, p) {
+        if (b.upgrading)
+            return; // one upgrade at a time
+        const isCC = b.type === "command_center";
+        const isDefense = !!def.weapon && !def.produces && !def.isWall; // guard/cannon/rocket towers
+        if (!isCC && !isDefense)
+            return;
+        const maxLvl = isCC ? MAX_BASE_LEVEL : MAX_DEFENSE_LEVEL;
+        if (b.level >= maxLvl)
+            return;
+        const cost = isCC ? CC_UPGRADE_COSTS[b.level - 1] : defenseUpgradeCost(def.cost);
+        if (!this.canAfford(p, cost)) {
+            this.events.push({ e: "toast", key: this.shortfallKey(p, cost), kind: "danger", to: b.owner });
+            return;
+        }
+        this.pay(p, cost);
+        const time = isCC ? CC_UPGRADE_TIMES[b.level - 1] : upgradeTime(def.buildTime);
+        b.upgrading = { to: b.level + 1, progress: 0, time };
         this.events.push({ e: "float", pos: b.pos, text: "▲", color: "#ffd23f" });
     }
     // ---------- T26: Research Center timed research ----------
@@ -680,11 +737,13 @@ export class World {
         }
         for (const p of this.players)
             p.brownout = (p.powerGen - p.powerUse) < 0;
-        // silver mines: count miners in slot
+        // T30: EVERY mine needs at least one miner working inside it. Silver scales with its miners
+        // (up to the canonical slot cap); iron / gold / captured oil produce at their fixed canonical
+        // interval while occupied, and NOTHING when empty. `minerSlots` is the live occupancy.
         for (const e of this.entities) {
-            if (e.dead)
+            if (e.dead || e.constructing)
                 continue;
-            if (e.type === "silver_mine" && !e.constructing) {
+            if (e.type === "silver_mine") {
                 const slots = Math.min(e.minerSlots, SILVER_MINE_SLOTS);
                 if (slots > 0) {
                     e.resAccum += (slots / MINER_OUTPUT_INTERVAL) * TICK_DT;
@@ -695,28 +754,34 @@ export class World {
                     }
                 }
             }
-            else if (e.type === "iron_mine" && !e.constructing) {
-                e.resAccum += TICK_DT / IRON_INTERVAL;
-                while (e.resAccum >= 1) {
-                    e.resAccum -= 1;
-                    this.players[e.owner].iron += 1;
-                    this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#8c98a4" });
+            else if (e.type === "iron_mine") {
+                if (e.minerSlots > 0) {
+                    e.resAccum += TICK_DT / IRON_INTERVAL;
+                    while (e.resAccum >= 1) {
+                        e.resAccum -= 1;
+                        this.players[e.owner].iron += 1;
+                        this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#8c98a4" });
+                    }
                 }
             }
-            else if (e.type === "gold_mine" && !e.constructing) {
-                e.resAccum += TICK_DT / GOLD_INTERVAL;
-                while (e.resAccum >= 1) {
-                    e.resAccum -= 1;
-                    this.players[e.owner].gold += 1;
-                    this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#ffd23f" });
+            else if (e.type === "gold_mine") {
+                if (e.minerSlots > 0) {
+                    e.resAccum += TICK_DT / GOLD_INTERVAL;
+                    while (e.resAccum >= 1) {
+                        e.resAccum -= 1;
+                        this.players[e.owner].gold += 1;
+                        this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#ffd23f" });
+                    }
                 }
             }
-            else if (e.type === "oil_derrick" && e.owner !== NEUTRAL && !e.constructing) {
-                e.resAccum += TICK_DT / OIL_INTERVAL;
-                while (e.resAccum >= 1) {
-                    e.resAccum -= 1;
-                    this.players[e.owner].silver += 1;
-                    this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" });
+            else if (e.type === "oil_derrick" && e.owner !== NEUTRAL) {
+                if (e.minerSlots > 0) {
+                    e.resAccum += TICK_DT / OIL_INTERVAL;
+                    while (e.resAccum >= 1) {
+                        e.resAccum -= 1;
+                        this.players[e.owner].silver += 1;
+                        this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" });
+                    }
                 }
             }
         }
@@ -771,6 +836,16 @@ export class World {
                 if (e.researching.progress >= 1)
                     this.completeResearch(e);
             }
+            // T30: timed level upgrade (Command Center / defensive tower). Applies the new level when done.
+            if (e.upgrading) {
+                e.upgrading.progress += TICK_DT / e.upgrading.time;
+                if (e.upgrading.progress >= 1) {
+                    e.level = e.upgrading.to;
+                    e.upgrading = null;
+                    this.events.push({ e: "rankup", pos: e.pos });
+                    this.events.push({ e: "toast", key: "toast.upgradeComplete", kind: "ok", params: { name: BUILDING_DEFS[e.type].nameKey, lvl: e.level }, to: e.owner });
+                }
+            }
         }
     }
     spawnTrained(b, unit) {
@@ -784,7 +859,7 @@ export class World {
             this.autoAssignMiner(u);
         this.events.push({ e: "toast", key: "toast.unitReadyNamed", kind: "ok", params: { unit: UNIT_DEFS[unit].nameKey }, to: b.owner });
     }
-    // ---------- workers (spec §6.3) ----------
+    // ---------- workers (spec §6.3; T30: every mine type, miners enter & hide) ----------
     workerSystem() {
         for (const e of this.entities) {
             if (e.type !== "miner" || e.dead)
@@ -794,26 +869,35 @@ export class World {
                 if (!mine || mine.dead) {
                     e.mineId = null;
                     e.mining = false;
+                    e.inMine = false;
                     continue;
                 }
                 if (this.dist(e.pos, mine.pos) <= mine.radius + 1.2) {
                     if (!e.mining) {
                         const cur = this.countMiners(mine.id);
-                        if (cur < SILVER_MINE_SLOTS) {
+                        if (cur < mineSlotCap(mine.type)) {
+                            // T30 C2/C3: the miner ENTERS the mine — it works inside and disappears from the map.
                             e.mining = true;
+                            e.inMine = true;
+                            e.path = [];
+                            e.moveTarget = null;
+                            e.pos = { x: mine.pos.x, y: mine.pos.y };
                             mine.minerSlots = cur + 1;
                         }
                         else {
                             e.mineId = null;
-                        } // full
+                            this.autoAssignMiner(e); // full → look for another free mine
+                        }
                     }
                 }
             }
         }
-        // recount miner slots authoritatively
-        for (const e of this.entities)
-            if (e.type === "silver_mine" && !e.dead)
-                e.minerSlots = this.countMiners(e.id);
+        // recount occupancy authoritatively for ALL mine types (capped by the per-type slot count)
+        for (const e of this.entities) {
+            if (e.dead || !isMineType(e.type))
+                continue;
+            e.minerSlots = Math.min(this.countMiners(e.id), mineSlotCap(e.type));
+        }
     }
     countMiners(mineId) {
         let n = 0;
@@ -822,14 +906,28 @@ export class World {
                 n++;
         return n;
     }
+    // T30: release every miner working inside a mine that is being destroyed/sold — eject them next to
+    // the rubble as idle units (visible again) and auto-reassign them so workers are never lost.
+    releaseMiners(mine) {
+        for (const e of this.entities) {
+            if (e.type !== "miner" || e.dead || e.mineId !== mine.id)
+                continue;
+            e.mineId = null;
+            e.mining = false;
+            e.inMine = false;
+            const free = nearestFree(this.grid, Math.floor(mine.pos.x), Math.floor(mine.pos.y)) || { x: Math.floor(mine.pos.x), y: Math.floor(mine.pos.y) };
+            e.pos = { x: free.x + 0.5, y: free.y + 0.5 };
+            this.autoAssignMiner(e);
+        }
+    }
     autoAssignMiner(m) {
-        // send idle miner to nearest silver mine with a free slot
+        // T30: send an idle miner to the nearest owned, built mine of ANY type with a free work slot.
         let best = null;
         let bd = 1e9;
         for (const e of this.entities) {
-            if (e.type !== "silver_mine" || e.dead || e.owner !== m.owner || e.constructing)
+            if (!isMineType(e.type) || e.dead || e.owner !== m.owner || e.owner === NEUTRAL || e.constructing)
                 continue;
-            if (this.countMiners(e.id) >= SILVER_MINE_SLOTS)
+            if (this.countMiners(e.id) >= mineSlotCap(e.type))
                 continue;
             const d = this.dist(e.pos, m.pos);
             if (d < bd) {
@@ -840,6 +938,7 @@ export class World {
         if (best) {
             m.mineId = best.id;
             m.mining = false;
+            m.inMine = false;
             this.setMove(m, best.pos.x, best.pos.y);
         }
     }
@@ -981,9 +1080,19 @@ export class World {
     }
     effRange(e, wd) {
         let r = wd.range + RANK_RANGE[e.rank];
+        // T30: a defensive tower's range grows with its level.
+        if (e.kind === "building" && e.level > 1)
+            r += (e.level - 1) * DEFENSE_RANGE_PER_LEVEL;
         if (e.kind === "building" && this.players[e.owner]?.brownout)
             r *= BROWNOUT_TOWER_RANGE_MULT;
         return r;
+    }
+    // T30: a defensive tower's weapon damage grows with its level (units keep level 1 → unchanged).
+    effDamage(e, wd) {
+        let d = wd.damage;
+        if (e.kind === "building" && e.level > 1)
+            d *= 1 + DEFENSE_DAMAGE_PER_LEVEL * (e.level - 1);
+        return d;
     }
     acquire(e, wd, inRangeOnly = false) {
         let best;
@@ -994,6 +1103,8 @@ export class World {
         for (const o of this.entities) {
             if (o.dead || !this.isEnemy(e, o))
                 continue;
+            if (o.inMine)
+                continue; // T30: miners working inside a mine are untargetable
             const isAir = false; // no aircraft tier implemented
             if (o.kind === "unit" && UNIT_DEFS[o.type].isVehicle === undefined) { /* */ }
             // can this weapon hit the target armor? (matrix 0 => cannot)
@@ -1033,16 +1144,17 @@ export class World {
             bonus = e.hero.burstBonus;
             e.hero.burstShots--;
         }
+        const dmg = this.effDamage(e, wd); // T30: level-scaled for defensive towers
         if (wd.projectileSpeed === 0) {
             // hitscan tracer
             this.events.push({ e: "fire", from: { ...e.pos }, to: { ...tgt.pos }, kind: wd.projectile, owner: e.owner, speed: 0, arc: false, shots: 1, shotDelay: 0 });
-            this.dealDamage(e, tgt, wd.damage + bonus, wd.damageType);
+            this.dealDamage(e, tgt, dmg + bonus, wd.damageType);
         }
         else {
             for (let s = 0; s < shots; s++) {
                 const proj = {
                     kind: wd.projectile, pos: { ...e.pos }, aim: { ...tgt.pos }, targetId: tgt.id, attackerId: e.id,
-                    speed: wd.projectileSpeed, damage: wd.damage + (s === 0 ? bonus : 0), damageType: wd.damageType,
+                    speed: wd.projectileSpeed, damage: dmg + (s === 0 ? bonus : 0), damageType: wd.damageType,
                     splash: wd.splash ?? 0, owner: e.owner, arc: wd.projectile === "artillery",
                     delay: s * (wd.shotDelay ?? 0), t: 0, total: 0, dead: false, rot: e.turret, trail: [],
                 };
@@ -1102,6 +1214,8 @@ export class World {
         for (const o of this.entities) {
             if (o.dead)
                 continue;
+            if (o.inMine)
+                continue; // T30: miners inside a mine are shielded from splash
             if (o.owner === owner)
                 continue;
             if (o.owner === NEUTRAL && o.kind === "neutral")
@@ -1119,6 +1233,8 @@ export class World {
     dealDamageRaw(tgt, base, type, owner, attacker) {
         if (tgt.dead)
             return;
+        if (tgt.inMine)
+            return; // T30: a miner working inside a mine cannot be hit
         if (tgt.hero && this.time < tgt.hero.invulnUntil)
             return;
         const mult = damageMultiplier(type, this.armorOf(tgt));
@@ -1188,6 +1304,9 @@ export class World {
         if (e.dead)
             return;
         e.dead = true;
+        // T30: a destroyed/sold mine ejects its occupant miners back onto the map (idle, auto-reassigned).
+        if (isMineType(e.type))
+            this.releaseMiners(e);
         const ownerP = this.players[e.owner];
         if (e.kind === "building") {
             this.occupy(e, false);

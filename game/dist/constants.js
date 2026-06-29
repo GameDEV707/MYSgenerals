@@ -48,9 +48,54 @@ export function powerStatus(gen, use) {
         return "low";
     return "ok";
 }
+// ---- T30: Command Center leveling + tech-gated build tree (spec §24 → T30 Part A) ----
+// Starting balance (tunable in T21). The base starts at Level 1 and can be upgraded twice.
+export const MAX_BASE_LEVEL = 3;
+// Cost indexed by the level being LEFT (0 = L1→L2, 1 = L2→L3).
+export const CC_UPGRADE_COSTS = [
+    { silver: 80, iron: 15 }, // L1 → L2
+    { gold: 2, silver: 150, iron: 30 }, // L2 → L3
+];
+// Timed upgrade durations (seconds), same indexing. These are explicit (the CC has no buildTime).
+export const CC_UPGRADE_TIMES = [20, 30];
+// Minimum Command-Center level required to BUILD each building (default 1 when absent). Barracks +
+// Cannon Tower need L2; War Factory + Rocket Tower need L3. Everything else is available at L1.
+export const REQUIRED_BASE_LEVEL = {
+    barracks: 2, cannon_tower: 2,
+    war_factory: 3, rocket_tower: 3,
+};
+// ---- T30: upgradeable defenses (spec §24 → T30 Part B) ----
+export const MAX_DEFENSE_LEVEL = 3; // towers upgrade 1 → 2 → 3
+export const DEFENSE_RANGE_PER_LEVEL = 1; // +1 tile range per level above 1
+export const DEFENSE_DAMAGE_PER_LEVEL = 0.25; // +25% weapon damage per level above 1
+export const DEFENSE_UPGRADE_COST_FRAC = 0.75; // each upgrade ≈ 75% of the base build cost
+// Cost of one defense upgrade: 75% of the building's base build cost (rounded), per step.
+export function defenseUpgradeCost(base) {
+    const scale = (n) => (n ? Math.max(1, Math.round(n * DEFENSE_UPGRADE_COST_FRAC)) : undefined);
+    const out = {};
+    if (base.silver)
+        out.silver = scale(base.silver);
+    if (base.iron)
+        out.iron = scale(base.iron);
+    if (base.gold)
+        out.gold = scale(base.gold);
+    return out;
+}
+// The canonical T30 rule: a level upgrade takes HALF the time a comparable build would.
+export function upgradeTime(buildTime) { return Math.max(1, Math.ceil(buildTime / 2)); }
+// ---- T30: worked-mine economy (spec §24 → T30 Part C) ----
+// Work slots per mine type: silver scales with miners up to its canonical cap; iron/gold/oil need
+// exactly one miner working inside. A mine with zero occupancy produces nothing.
+export function mineSlotCap(type) {
+    return type === "silver_mine" ? SILVER_MINE_SLOTS : 1;
+}
+export function isMineType(type) {
+    return type === "silver_mine" || type === "iron_mine" || type === "gold_mine" || type === "oil_derrick";
+}
 export function mineEta(type, resAccum, minerSlots) {
     const accum = Math.max(0, Math.min(1, resAccum));
     const remain = 1 - accum;
+    const occupied = Math.max(0, minerSlots) > 0;
     switch (type) {
         case "silver_mine": {
             const slots = Math.min(Math.max(0, minerSlots), SILVER_MINE_SLOTS);
@@ -59,9 +104,18 @@ export function mineEta(type, resAccum, minerSlots) {
             const ratePerSec = slots / MINER_OUTPUT_INTERVAL; // +1 every MINER_OUTPUT_INTERVAL per miner
             return { seconds: remain / ratePerSec, progress: accum, resource: "silver", idle: false };
         }
-        case "iron_mine": return { seconds: remain * IRON_INTERVAL, progress: accum, resource: "iron", idle: false };
-        case "gold_mine": return { seconds: remain * GOLD_INTERVAL, progress: accum, resource: "gold", idle: false };
-        case "oil_derrick": return { seconds: remain * OIL_INTERVAL, progress: accum, resource: "silver", idle: false };
+        case "iron_mine":
+            if (!occupied)
+                return { seconds: null, progress: 0, resource: "iron", idle: true };
+            return { seconds: remain * IRON_INTERVAL, progress: accum, resource: "iron", idle: false };
+        case "gold_mine":
+            if (!occupied)
+                return { seconds: null, progress: 0, resource: "gold", idle: true };
+            return { seconds: remain * GOLD_INTERVAL, progress: accum, resource: "gold", idle: false };
+        case "oil_derrick":
+            if (!occupied)
+                return { seconds: null, progress: 0, resource: "silver", idle: true };
+            return { seconds: remain * OIL_INTERVAL, progress: accum, resource: "silver", idle: false };
         default: return null;
     }
 }

@@ -43,6 +43,8 @@ export interface EntitySnap {
   spd?: number;                                            // T26: assembly-speed level (producer)
   rs?: { id: string; progress: number; time: number };     // T26: active research (research center)
   mn?: { s: number; p: number; res: string; idle: boolean }; // T29: own resource-mine extraction ETA (s = seconds to next +1; idle silver → s 0, idle true)
+  lvl?: number;                                              // T30: building level (CC / defensive tower) — own-entity only, omitted when 1
+  up?: { to: number; progress: number; time: number };       // T30: active timed level upgrade
   hero?: { mana: number; maxMana: number; ab: { rank: number; cd: number }[] };
 }
 

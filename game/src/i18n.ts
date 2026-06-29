@@ -221,6 +221,12 @@ const en: Dict = {
   "upgrade.maxed": "Max level reached",
   "upgrade.maxedShort": "MAX",
   "upgrade.needTech": "Needs Factory Tech",
+  "upgrade.toLevel": "Upgrade → Lvl {n}",
+  "upgrade.upgrading": "Upgrading…",
+  "errors.needBaseLevel": "Requires Command Center Lvl {lvl}",
+  "hud.level": "Lvl {n}",
+  "hud.range": "Range {n}",
+  "hud.damage": "Damage {n}",
 
   "research.title": "Research",
   "research.researching": "Researching:",
@@ -256,6 +262,7 @@ const en: Dict = {
   "toast.heroDown": "Hero down — respawning",
   "toast.heroReady": "Hero respawned",
   "toast.brownout": "Power shortage — production slowed",
+  "toast.upgradeComplete": "{name} upgraded to Lvl {lvl}",
 
   "help.title": "How to Play",
   "help.body":
@@ -492,6 +499,12 @@ const ru: Dict = {
   "upgrade.maxed": "Достигнут максимум",
   "upgrade.maxedShort": "МАКС",
   "upgrade.needTech": "Нужна Заводская технология",
+  "upgrade.toLevel": "Улучшить → Ур. {n}",
+  "upgrade.upgrading": "Улучшение…",
+  "errors.needBaseLevel": "Требуется Командный центр ур. {lvl}",
+  "hud.level": "Ур. {n}",
+  "hud.range": "Радиус {n}",
+  "hud.damage": "Урон {n}",
 
   "research.title": "Исследования",
   "research.researching": "Исследуется:",
@@ -527,6 +540,7 @@ const ru: Dict = {
   "toast.heroDown": "Герой пал — возрождение",
   "toast.heroReady": "Герой возродился",
   "toast.brownout": "Нехватка энергии — производство замедлено",
+  "toast.upgradeComplete": "{name} улучшен до ур. {lvl}",
 
   "help.title": "Как играть",
   "help.body":
@@ -763,6 +777,12 @@ const uz: Dict = {
   "upgrade.maxed": "Maksimal daraja",
   "upgrade.maxedShort": "MAKS",
   "upgrade.needTech": "Zavod texnologiyasi kerak",
+  "upgrade.toLevel": "Kuchaytirish → {n}-daraja",
+  "upgrade.upgrading": "Kuchaytirilmoqda…",
+  "errors.needBaseLevel": "Bosh shtab {lvl}-daraja boʻlishi kerak",
+  "hud.level": "{n}-daraja",
+  "hud.range": "Radius {n}",
+  "hud.damage": "Zarar {n}",
 
   "research.title": "Tadqiqot",
   "research.researching": "Tadqiq qilinmoqda:",
@@ -798,6 +818,7 @@ const uz: Dict = {
   "toast.heroDown": "Qahramon halok boʻldi — tiklanmoqda",
   "toast.heroReady": "Qahramon tiklandi",
   "toast.brownout": "Quvvat yetishmovchiligi — ishlab chiqarish sekinlashdi",
+  "toast.upgradeComplete": "{name} {lvl}-darajaga koʻtarildi",
 
   "help.title": "Qanday oʻynash",
   "help.body":

@@ -246,14 +246,17 @@ export class WorldView {
         this.blocked.fill(0);
         for (let i = 0; i < m.terrain.length; i++) {
             const t = m.terrain[i];
-            if (t === 1 || t === 2)
+            if (t === 1 || t === 2 || t === 4)
                 this.blocked[i] = 1;
         }
         let nearOwn = false;
         for (const e of this.entities) {
-            if (e.kind !== "building")
+            // T32: buildings AND owned outposts (forward sub-bases) block tiles + anchor construction.
+            const isBuilding = e.kind === "building";
+            const isOutpost = e.type === "outpost";
+            if (!isBuilding && !isOutpost)
                 continue;
-            const fp = BUILDING_DEFS[e.type]?.footprint ?? 2;
+            const fp = BUILDING_DEFS[e.type]?.footprint ?? 3;
             const half = Math.floor(fp / 2);
             const cx = Math.floor(e.pos.x), cy = Math.floor(e.pos.y);
             for (let dy = -half; dy < fp - half; dy++)
@@ -262,7 +265,7 @@ export class WorldView {
                     if (tx >= 0 && ty >= 0 && tx < m.w && ty < m.h)
                         this.blocked[ty * m.w + tx] = 1;
                 }
-            if (e.owner === this.me && Math.hypot(e.pos.x - (x + 0.5), e.pos.y - (y + 0.5)) <= 8 + e.radius)
+            if (e.owner === this.me && (isBuilding || isOutpost) && Math.hypot(e.pos.x - (x + 0.5), e.pos.y - (y + 0.5)) <= 8 + e.radius)
                 nearOwn = true;
         }
         const fp = BUILDING_DEFS[building].footprint, half = Math.floor(fp / 2);

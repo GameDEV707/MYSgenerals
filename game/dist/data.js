@@ -137,7 +137,14 @@ export const BUILDING_DEFS = {
         cost: { iron: 2, silver: 4 }, buildTime: 3, footprint: 1, vision: 2, icon: "🧱", category: "defense", isWall: true,
     },
 };
-export const NEUTRAL_VISION = { oil_derrick: 5 };
+export const NEUTRAL_VISION = { oil_derrick: 5, outpost: 8 };
+export const NEUTRAL_DEFS = {
+    oil_derrick: { hp: 800, vision: 5, radius: 1.2, footprint: 3, nameKey: "buildings.oilDerrick.name", icon: "🛢" },
+    outpost: {
+        hp: 1600, vision: 8, radius: 1.3, footprint: 3, nameKey: "buildings.outpost.name", icon: "🏯",
+        weapon: { damage: 20, damageType: "Bullet", range: 7, cooldown: 0.7, projectile: "tracer", projectileSpeed: 0, targetsGround: true, targetsAir: true, preferred: "InfantryLight" },
+    },
+};
 export const RESEARCH_DEFS = [
     { id: "weapons1", kind: "weapons", level: 1, nameKey: "research.weapons1.name", descKey: "research.weapons.desc", cost: { gold: 1, iron: 10, silver: 40 }, time: 25 },
     { id: "weapons2", kind: "weapons", level: 2, nameKey: "research.weapons2.name", descKey: "research.weapons.desc", cost: { gold: 2, iron: 20, silver: 80 }, time: 35, requires: "weapons1" },

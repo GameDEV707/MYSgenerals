@@ -2018,6 +2018,121 @@ DoD: the player **starts with an Engineer** and can **immediately select it and 
 
 ---
 
+### T32 — Bigger multi-base maps with base obstacles & walls, capturable garrisoned outposts (sub-bases), and stronger miner mine-finding & AI  *(map & world enrichment)*
+
+> Source of truth: `MYSgenerals.md` §24 → T32. **Extends the authoritative simulation** (§3.2): adds a
+> new **wall terrain type**, a new capturable **outpost** neutral (a garrisoned defensive tower that
+> becomes a forward sub-base when captured), and improves the miner mine-finding and skirmish-AI logic
+> — but introduces **no new netcode**: outposts capture through the existing presence/engineer capture
+> path and are snapshotted like the existing `oil_derrick` neutral, so it behaves identically in
+> single-player, split-screen (T24) and LAN (T25). All numbers are starting balance (tunable in T21).
+
+**Goal (restated, from the design owner):** the maps are too small and there are only **two** bases.
+Make the maps **bigger** and give them **more bases** like **Dota / C&C Generals** — a few **big**
+main bases **and** several **small** sub-bases. Put **obstacles / walls inside the bases** (defensive
+terrain with a gate). Add **capturable towers** garrisoned with **simple soldiers / a tank that do not
+get stronger** for a third party — they are used as **sub-bases**, and **whoever captures one owns it**.
+Enlarge the maps and **add walls**. Finally, make the **miners' mine-finding logic and the AI logic
+stronger**, and fix the related bugs.
+
+**Defects / gaps being addressed:**
+- **Maps are small with only main bases.** `sim/map.ts` ships `twin_rivers` (64×64, 2 spawns) and
+  `crossfire` (72×72, 4 spawns) with only natural rock dots and no fortifications, no sub-bases, and
+  the only neutral is the `oil_derrick` (pure income, no garrison, instantly capturable).
+- **No "wall" terrain.** Terrain is only grass/cliff/water/road (`0..3`); there is no distinct,
+  blocking **wall** to fortify a base.
+- **No capturable sub-base.** Nothing on the map can be **fought for and then used as a forward base**.
+- **Miner mine-finding is naive.** `autoAssignMiner()` picks the **nearest** owned free mine by raw
+  distance with **no reachability check** — on a fortified/obstacle-heavy map a miner can claim a mine
+  it cannot path to and **stall**, and its claim blocks other miners (the "miner stuck near a mine /
+  never digs" class of bug).
+- **AI ignores sub-bases.** `sim/ai.ts manageCapture()` only nudges a single unit toward an
+  `oil_derrick`; it never contests/garrisons the new outposts and under-uses the larger maps.
+
+### Part A — Wall terrain + base obstacles (fortified bases with a gate)
+- **A1. New `wall` terrain (value `4`).** A distinct **blocking, unbuildable** terrain tile (stone),
+  in addition to grass/cliff/water/road. It blocks ground movement (pathfinding) exactly like a cliff,
+  cannot be built on, and renders as a clear stone wall on the world view **and** the minimap.
+- **A2. Fortified bases.** Every main base is enclosed on its two **center-facing** sides by a **wall**
+  with a **wide gate** (≈5 tiles) facing the map centre, plus **cliff/rock obstacle clusters** as cover.
+  The base interior (Command Center, the starting silver mine + miner, the starting Engineer, the hero,
+  and the base-adjacent iron/gold deposits) stays **inside** the walls and **reachable**: a path must
+  exist from each spawn out through its gate to the map centre and to every deposit/outpost.
+
+### Part B — Capturable garrisoned outposts (sub-bases)
+- **B1. New `outpost` neutral.** A neutral **defensive tower** with a **garrison weapon** (a simple,
+  fixed-strength gun — **no veterancy, no level scaling**, it never gets stronger) that **fires on any
+  intruding non-owner unit**. It is **invulnerable to direct attack** (like every neutral) — you take
+  it by **out-staying its fire**, not by destroying it.
+- **B2. Capture = ownership ("whoever captures it, owns it").** Captured by **presence** (a single
+  player's units held within radius for the outpost capture time) **or** by an Engineer channel, exactly
+  like the oil derrick but with a **longer capture time** (it is a sub-base, not a quick income point).
+  On capture it becomes that player's outpost: its garrison gun now **fires for the new owner**, it
+  grants **vision**, and it can be **re-captured** by an enemy the same way (contested forward point).
+- **B3. Outpost = a forward sub-base (build anchor).** An **owned** outpost counts as a **build anchor**
+  for `placementValid()` (like an owned building), so capturing one lets the owner **build around it** —
+  a genuine forward/expansion base near the contested expansion deposits. (It is **not** a Command
+  Center, so owning one does not by itself keep a defeated player alive.)
+- **B4. More bases, big & small.** Maps now read as **big main bases** (the fortified spawns) **plus
+  several small sub-bases** (the outposts), Dota/Generals-style, with expansion deposits placed near the
+  outposts so contesting a sub-base is worthwhile.
+
+### Part C — Bigger maps with more bases & walls
+- **C1. Enlarge & enrich the shipped maps.** `twin_rivers` and `crossfire` grow, gain fortified bases
+  (A2), capturable outposts (B), walls (A1) and more/contested deposits.
+- **C2. A new large multi-base map.** Add **`iron_crossroads`** (a big 4-main-base map) with fortified
+  corners, a walled/obstacle-laced interior, several outposts and contested central resources, so a
+  match can field **four big bases and many small sub-bases at once**. The lobby/setup map list and the
+  per-map description/name read it (trilingual), and the map label uses the map's own `nameKey` (no more
+  hard-coded "mapA/mapB" binary).
+
+### Part D — Stronger miner mine-finding & AI
+- **D1. Reachability-aware mine assignment.** `autoAssignMiner()` prefers the **nearest reachable**
+  free mine (a real path exists), **skipping unreachable** ones so a miner never claims a mine it cannot
+  walk to. A miner that has been assigned but **cannot make progress** re-evaluates and **re-routes** to
+  another reachable free mine (releasing its stale claim) instead of stalling forever.
+- **D2. AI uses sub-bases & the bigger maps.** The skirmish AI **contests and garrisons outposts**
+  (sends a small squad to capture the nearest neutral/enemy outpost, by presence), keeps expanding its
+  mine economy, and pushes/defends with a little hysteresis so it does not thrash its army; Easy/Normal/
+  Hard cadence is preserved and it still fields an army and fights on every map.
+
+**Docs.** Add a **T32 section to `PROGRESS.md`** in the T26–T31 style (Scope checklist, "How each DoD
+line was verified", "[OPT] deferred"), and update `README.md` (bigger fortified multi-base maps with
+walls & obstacles; capturable garrisoned outposts that become forward sub-bases; stronger miner
+mine-finding; AI contests sub-bases).
+
+### Scope checklist (T32)
+- [ ] A distinct **wall terrain (4)** blocks movement, is unbuildable, and renders on the world + minimap.
+- [ ] Every main base is **fortified** (walls on the two center-facing sides + a wide gate + obstacle
+      clusters); the interior and all deposits/outposts remain **reachable** from the spawn.
+- [ ] A capturable **outpost** neutral exists: a garrisoned tower that **fires on intruders**, is
+      **invulnerable to direct attack**, has **no veterancy/level scaling**, and is captured by presence
+      or engineer; on capture it **fires for the new owner**, grants vision, and is **re-capturable**.
+- [ ] An **owned outpost is a build anchor** (forward sub-base) for `placementValid()`, but is **not** a
+      Command Center for win/lose.
+- [ ] The shipped maps are **bigger** and gain fortified bases + outposts + walls + more deposits; a new
+      **`iron_crossroads`** big 4-base map is added and selectable, with trilingual name + description and
+      a `nameKey`-driven map label.
+- [ ] **Miner mine-finding** is **reachability-aware** (nearest *reachable* free mine; re-routes when
+      stuck) so miners never stall on an unreachable claim.
+- [ ] The **AI** contests/garrisons outposts and still expands + fights on every map; SP / split-screen
+      (T24) / LAN (T25) regress cleanly.
+- [ ] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography U+02BB/U+02BC);
+      `localeParity()` passes.
+- [ ] New + existing **headless tests pass**; `bash build.sh` is clean.
+
+DoD: the maps are **noticeably larger** and read like **Dota/Generals** — a few **big fortified main
+bases** (walls + a gate + obstacles) **and several small capturable sub-bases**; a **garrisoned outpost**
+shoots at anyone who approaches, can be **taken by holding it under fire** (no destruction needed), and
+once taken it **defends and builds for its owner** as a forward base and can be **lost to a re-capture**;
+**miners reliably find and reach a free mine** (no stalling on an unreachable one) and the **AI fights
+for the sub-bases**. Everything is **host-authoritative** and identical across single-player,
+split-screen (T24) and LAN (T25). Verifiable headlessly: the new map-reachability and outpost
+capture/anchor suites pass, the miner mine-finding suite passes, `bash build.sh` is clean and every suite
+is green, and all UI reads correctly in uz/ru/en.
+
+---
+
 ## 25. Localization Finalization Task (T20 — detailed)
 
 This is the **separate, dedicated localization task** to run **after** the game is functionally complete (after T18). The goal is that the game reads naturally and correctly in **Uzbek, Russian, and English**, with every in-game term re-checked against the game's actual meaning and logic — not just literally translated.

@@ -4,7 +4,7 @@
 import {
   Vec2, UnitId, BuildingId, Cost, ResKind, DamageType, ArmorType, ProjectileKind,
 } from "../types.js";
-import { UNIT_DEFS, BUILDING_DEFS, damageMultiplier, RESEARCH_BY_ID, ResearchDef } from "../data.js";
+import { UNIT_DEFS, BUILDING_DEFS, NEUTRAL_DEFS, damageMultiplier, RESEARCH_BY_ID, ResearchDef } from "../data.js";
 import {
   TICK_DT, START_SILVER, MINER_OUTPUT_INTERVAL, IRON_INTERVAL, GOLD_INTERVAL,
   OIL_INTERVAL, CC_POWER, BROWNOUT_PRODUCTION_MULT, BROWNOUT_TOWER_FIRE_MULT, BROWNOUT_TOWER_RANGE_MULT,
@@ -14,7 +14,8 @@ import {
   SPEED_UPGRADE_COSTS, RESEARCH_DAMAGE_PER_LEVEL, RESEARCH_ARMOR_PER_LEVEL, LOGISTICS_BUILD_MULT,
   MAX_BASE_LEVEL, CC_UPGRADE_COSTS, CC_UPGRADE_TIMES, REQUIRED_BASE_LEVEL, MAX_DEFENSE_LEVEL,
   DEFENSE_RANGE_PER_LEVEL, DEFENSE_DAMAGE_PER_LEVEL, defenseUpgradeCost, upgradeTime,
-  mineSlotCap, isMineType,
+  mineSlotCap, isMineType, DERRICK_CAPTURE_TIME, OUTPOST_CAPTURE_TIME, OUTPOST_CAPTURE_RADIUS,
+  OUTPOST_CAPTURE_BOUNTY,
 } from "../constants.js";
 import { NavGrid, findPath, nearestFree } from "./grid.js";
 import { GameMap } from "./map.js";
@@ -60,6 +61,7 @@ export class Entity {
   // worker / economy
   isWorker = false; isVehicle = false;
   mineId: number | null = null; mining = false;
+  mineRetry = 0; // T32 D1: consecutive failed attempts to reach an assigned mine (stuck recovery)
   buildTask: { bid: BuildingId; pos: Vec2; entId: number } | null = null;
   captureTask: { target: number } | null = null;
   // building
@@ -201,7 +203,7 @@ export class World {
     this.grid.terrain = map.terrain;
     for (let i = 0; i < map.terrain.length; i++) {
       const t = map.terrain[i];
-      if (t === 1 || t === 2) this.grid.blocked[i] = 1; // cliff & water block ground
+      if (t === 1 || t === 2 || t === 4) this.grid.blocked[i] = 1; // cliff, water & wall block ground (T32)
     }
   }
 
@@ -220,7 +222,10 @@ export class World {
       e.radius = d.footprint / 2; e.power = d.power; e.weaponDef = d.weapon;
       this.occupy(e, true);
     } else if (kind === "neutral") {
-      e.maxHp = 800; e.hp = 800; e.vision = 5; e.radius = 1.2; e.owner = NEUTRAL; e.captureOwner = NEUTRAL;
+      // T32: read the neutral definition so an outpost gets its garrison weapon + larger vision.
+      const nd = NEUTRAL_DEFS[type as keyof typeof NEUTRAL_DEFS] ?? NEUTRAL_DEFS.oil_derrick;
+      e.maxHp = nd.hp; e.hp = nd.hp; e.vision = nd.vision; e.radius = nd.radius;
+      e.owner = NEUTRAL; e.captureOwner = NEUTRAL; e.weaponDef = nd.weapon;
       this.occupy(e, true);
     }
     this.entities.push(e); this.byId.set(e.id, e);
@@ -255,7 +260,7 @@ export class World {
   }
 
   setupNeutrals(): void {
-    for (const n of this.map.neutrals) this.spawn("neutral", "oil_derrick", NEUTRAL, n.x, n.y);
+    for (const n of this.map.neutrals) this.spawn("neutral", n.kind, NEUTRAL, n.x, n.y);
   }
 
   // ---------- helpers ----------
@@ -404,8 +409,9 @@ export class World {
       if (this.grid.terrain[this.grid.idx(tx, ty)] !== 0 && this.grid.terrain[this.grid.idx(tx, ty)] !== 3) return false;
       if (this.grid.isBlocked(tx, ty)) return false;
     }
-    // build radius (spec §7.3): within BUILD_RADIUS of an owned building
-    const near = this.entities.some((e) => e.owner === owner && e.kind === "building" && this.dist(e.pos, { x: x + 0.5, y: y + 0.5 }) <= BUILD_RADIUS + e.radius);
+    // build radius (spec §7.3): within BUILD_RADIUS of an owned building — OR an owned outpost
+    // (T32 Part B3: a captured outpost is a forward SUB-BASE that anchors construction around it).
+    const near = this.entities.some((e) => e.owner === owner && (e.kind === "building" || e.type === "outpost") && this.dist(e.pos, { x: x + 0.5, y: y + 0.5 }) <= BUILD_RADIUS + e.radius);
     if (!near) return false;
     // iron/gold mines require a matching deposit nearby (spec §6.3)
     if (building === "iron_mine" || building === "gold_mine") {
@@ -722,7 +728,7 @@ export class World {
             const cur = this.countMiners(mine.id);
             if (cur < mineSlotCap(mine.type)) {
               // T30 C2/C3: the miner ENTERS the mine — it works inside and disappears from the map.
-              e.mining = true; e.inMine = true; e.path = []; e.moveTarget = null;
+              e.mining = true; e.inMine = true; e.path = []; e.moveTarget = null; e.mineRetry = 0;
               e.pos = { x: mine.pos.x, y: mine.pos.y };
               mine.minerSlots = cur + 1;
             } else {
@@ -730,10 +736,13 @@ export class World {
             }
           }
         } else if (!e.mining && e.path.length === 0 && e.moveTarget == null) {
-          // Assigned to a mine but idled SHORT of it (its path ended early — e.g. the approach was
-          // briefly blocked). Re-issue the move so it keeps heading in instead of standing forever
-          // (this was a cause of miners stalling near a mine without ever entering it).
-          this.setMove(e, mine.pos.x, mine.pos.y);
+          // T32 D1: assigned to a mine but idled SHORT of it (its path ended early or was blocked).
+          // Re-path; if it genuinely can't be reached after a few tries, RELEASE the stale claim and
+          // re-route to another reachable free mine instead of stalling here forever.
+          const path = findPath(this.grid, e.pos.x, e.pos.y, mine.pos.x, mine.pos.y);
+          e.mineRetry++;
+          if (path && e.mineRetry < 6) { e.path = path; e.moveTarget = { x: mine.pos.x, y: mine.pos.y }; }
+          else { e.mineId = null; e.mineRetry = 0; this.autoAssignMiner(e); }
         }
       } else if (!e.mining && !e.inMine && e.path.length === 0 && e.moveTarget == null) {
         // T31 B3: an idle, unassigned miner WAITS near the base and auto-enters the next mine that is
@@ -771,15 +780,24 @@ export class World {
     }
   }
   autoAssignMiner(m: Entity): void {
-    // T30/T31: send an idle miner to the nearest owned, built mine that has no miner yet (one per
-    // mine). "Claimed" counts miners already walking toward / inside a mine, so miners spread out.
-    let best: Entity | null = null; let bd = 1e9;
+    // T30/T31: send an idle miner to an owned, built, free mine (one per mine). "Claimed" counts
+    // miners already walking toward / inside a mine, so miners spread out instead of stacking.
+    // T32 D1: prefer the nearest REACHABLE free mine — a mine the miner can actually path to — and
+    // skip ones it cannot reach (so it never claims an unreachable mine and stalls). If none is
+    // provably reachable, fall back to the nearest so it still tries.
+    const cands: Entity[] = [];
     for (const e of this.entities) {
       if (!isMineType(e.type) || e.dead || e.owner !== m.owner || e.owner === NEUTRAL || e.constructing) continue;
       if (this.claimedMiners(e.id) >= mineSlotCap(e.type)) continue;
-      const d = this.dist(e.pos, m.pos); if (d < bd) { bd = d; best = e; }
+      cands.push(e);
     }
-    if (best) { m.mineId = best.id; m.mining = false; m.inMine = false; this.setMove(m, best.pos.x, best.pos.y); }
+    cands.sort((a, b) => this.dist(a.pos, m.pos) - this.dist(b.pos, m.pos));
+    let chosen: Entity | null = null;
+    for (const e of cands) {
+      if (findPath(this.grid, m.pos.x, m.pos.y, e.pos.x, e.pos.y)) { chosen = e; break; }
+    }
+    if (!chosen && cands.length) chosen = cands[0]; // none provably reachable → try the nearest anyway
+    if (chosen) { m.mineId = chosen.id; m.mining = false; m.inMine = false; m.mineRetry = 0; this.setMove(m, chosen.pos.x, chosen.pos.y); }
   }
 
   // ---------- movement (spec §8.5) ----------
@@ -1091,32 +1109,42 @@ export class World {
   // ---------- capture (spec §12) ----------
   private captureSystem(): void {
     for (const e of this.entities) {
-      if (e.type !== "oil_derrick" || e.dead) continue;
+      // T32: both the oil derrick (income) and the outpost (garrisoned sub-base) capture by presence.
+      const isDerrick = e.type === "oil_derrick";
+      const isOutpost = e.type === "outpost";
+      if ((!isDerrick && !isOutpost) || e.dead) continue;
       if (e.bountyCd > 0) e.bountyCd -= TICK_DT;
-      // presence capture: who has units in radius?
+      const radius = isOutpost ? OUTPOST_CAPTURE_RADIUS : 3;
+      const time = isOutpost ? OUTPOST_CAPTURE_TIME : DERRICK_CAPTURE_TIME;
+      // presence capture: who has (visible, non-mining) units in radius?
       const owners = new Set<number>();
-      let nearOwner = -2;
       for (const u of this.entities) {
-        if (u.kind !== "unit" || u.dead) continue;
-        if (this.dist(u.pos, e.pos) <= 3) { owners.add(u.owner); nearOwner = u.owner; }
+        if (u.kind !== "unit" || u.dead || u.inMine) continue;
+        if (this.dist(u.pos, e.pos) <= radius) owners.add(u.owner);
       }
       if (owners.size === 1) {
         const o = [...owners][0];
         if (o !== e.owner) {
-          e.captureProgress += TICK_DT / 6;
+          e.captureProgress += TICK_DT / time;
           e.captureOwner = o;
           if (e.captureProgress >= 1) {
             e.owner = o; e.captureProgress = 0;
             this.occupy(e, true);
             this.events.push({ e: "capture", pos: e.pos, owner: o });
-            if (e.bountyCd <= 0) { this.players[o].silver += 50; this.events.push({ e: "float", pos: e.pos, text: "+50", color: "#c9d1d9" }); e.bountyCd = 30; }
-            this.events.push({ e: "toast", key: "toast.captured", kind: "ok", params: { name: "buildings.oilDerrick.name" }, to: o });
+            const name = isOutpost ? "buildings.outpost.name" : "buildings.oilDerrick.name";
+            if (e.bountyCd <= 0) {
+              const bounty = isOutpost ? OUTPOST_CAPTURE_BOUNTY : 50;
+              this.players[o].silver += bounty;
+              this.events.push({ e: "float", pos: e.pos, text: "+" + bounty, color: "#c9d1d9" });
+              e.bountyCd = 30;
+            }
+            this.events.push({ e: "toast", key: "toast.captured", kind: "ok", params: { name }, to: o });
           }
         }
       } else if (owners.size === 0) {
-        e.captureProgress = Math.max(0, e.captureProgress - TICK_DT / 6);
+        e.captureProgress = Math.max(0, e.captureProgress - TICK_DT / time);
       }
-      // engineer channel capture handled via captureTask in workerSystem-like check:
+      // (Engineer channel capture is handled below via captureTask.)
     }
     // engineer capture
     for (const e of this.entities) {
@@ -1131,7 +1159,7 @@ export class World {
           const wasEnemyStructure = tgt.owner !== NEUTRAL && tgt.kind === "building";
           tgt.owner = e.owner; tgt.captureProgress = 0;
           this.events.push({ e: "capture", pos: tgt.pos, owner: e.owner });
-          this.events.push({ e: "toast", key: "toast.captured", kind: "ok", params: { name: tgt.kind === "building" ? BUILDING_DEFS[tgt.type as BuildingId].nameKey : "buildings.oilDerrick.name" }, to: e.owner });
+          this.events.push({ e: "toast", key: "toast.captured", kind: "ok", params: { name: tgt.kind === "building" ? BUILDING_DEFS[tgt.type as BuildingId].nameKey : tgt.type === "outpost" ? "buildings.outpost.name" : "buildings.oilDerrick.name" }, to: e.owner });
           e.captureTask = null; e.captureProgress = 0;
           if (wasEnemyStructure) this.killEntity(e, false); // consumed
         }

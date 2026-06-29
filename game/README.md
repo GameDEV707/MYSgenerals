@@ -66,6 +66,7 @@ Needs the TypeScript compiler (`npm install -g typescript`).
 | Research | Select the Research Center → start a global upgrade (needs a built Research Center) |
 | Keyboard build (P1) | In keyboard control, `1`–`0` activate the command-panel buttons; with a builder selected, **`Space`** moves across the build categories and **`E`** opens the highlighted one (`]` / `[` also cycle directly). The switch key is remappable in Settings → Keyboard |
 | Keyboard zoom (P1) | In keyboard control, **`Shift`** zooms in and **`Ctrl`** zooms out (remappable in Settings → Keyboard). The mouse player uses the wheel |
+| Capture outpost / derrick | Move units onto it and hold the area (or send an Engineer to channel-capture) |
 | Minimap | Click to jump |
 | Pause | `☰` button (top-right) |
 
@@ -160,6 +161,29 @@ miner is **released** back onto the map and re-assigned.
 build, and it constructs** it (it also captures oil derricks). You **start with one Engineer** so you
 can build immediately, and you can train more at the Command Center — a **Miner for 5 silver** (digs)
 or an **Engineer for 20 silver** (builds). Miners never build; Engineers never mine.
+
+## Maps, fortified bases & capturable outposts (sub-bases)
+
+The maps are big, **fortified multi-base** arenas in the Dota / C&C Generals mould — a few **big main
+bases** plus several **small capturable sub-bases**:
+
+| Map | Size | Bases |
+|---|---|---|
+| **Twin Rivers** | 80×80 | 2 fortified bases, a river with bridges, **4** outposts |
+| **Crossfire** | 88×88 | 4 fortified corner bases around a central plateau, **4** outposts |
+| **Iron Crossroads** | 96×96 | 4 fortified main bases + a walled central cross, **6** outposts |
+
+**Fortified bases & walls.** Every main base is enclosed on its two centre-facing sides by a **stone
+wall** with a wide **gate**, plus **cliff/rock obstacle clusters** for cover. Walls and cliffs block
+movement and can't be built on, so attackers are funnelled through the gate. (You can still build your
+own **Wall** structures too.)
+
+**Capturable outposts (sub-bases).** Scattered across the map are neutral **outposts** — garrisoned
+defensive towers that **fire on anyone who approaches** and **cannot be destroyed by attack**. You take
+one by **holding it under fire** (bring a tanky force or an Engineer): whoever captures it **owns** it.
+A captured outpost then **defends and grants vision for you**, acts as a **forward build anchor** (you
+can build a sub-base around it, handy for the contested expansion deposits placed nearby), and can be
+**lost to an enemy re-capture**. The garrison is fixed-strength — it never levels up.
 
 ## Power
 
@@ -258,5 +282,8 @@ NODE_OPTIONS="" node test/basetech.mjs     # T30: Command-Center level gates the
 NODE_OPTIONS="" node test/upgrades.mjs     # T30: CC + defensive-tower level upgrades (half build time, +range/+damage, capped)
 NODE_OPTIONS="" node test/minework.mjs     # T30: worked-mine economy — unmanned = idle; miner enters/hides; release on death
 NODE_OPTIONS="" node test/workers.mjs      # T31: split worker roles — Engineer builds, Miner mines (one per mine), idle miners wait
+NODE_OPTIONS="" node test/maps.mjs         # T32: bigger fortified maps — wall/obstacle terrain, gate reachability, outposts, new big map
+NODE_OPTIONS="" node test/outpost.mjs      # T32: capturable garrisoned outpost — fires on intruders, invulnerable, capture = ownership, build anchor
+NODE_OPTIONS="" node test/minefind.mjs     # T32: reachability-aware miner assignment (skips walled-off mines; re-routes when stuck)
 ```
 

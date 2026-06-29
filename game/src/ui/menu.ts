@@ -2,7 +2,7 @@
 import { t, setLang, getLang, onLangChange, Lang } from "../i18n.js";
 import { Lobby, PALETTE } from "../host/lobby.js";
 import { SessionConfig, SessionPlayer, LocalSpec, Difficulty } from "../client/session.js";
-import { getMap } from "../sim/map.js";
+import { getMap, MAP_IDS } from "../sim/map.js";
 import { qrMatrix } from "../net/qr.js";
 import { LobbyState } from "../net/protocol.js";
 import { SocketTransport } from "../net/socketTransport.js";
@@ -15,7 +15,7 @@ export interface MenuCallbacks {
   onJoin: (opts: { url: string; name: string }, ui: JoinUI) => void;
 }
 
-const MAPS = ["twin_rivers", "crossfire"];
+const MAPS = MAP_IDS;
 
 export class Menu {
   root: HTMLElement;
@@ -90,7 +90,7 @@ export class Menu {
         <h2>${t("menu.singlePlayer")}</h2>
         <div class="field"><label>${t("menu.map")}</label>
           <select data-id="s-map">
-            ${MAPS.map((m) => `<option value="${m}" ${this.spCfg.map === m ? "selected" : ""}>${t(m === "twin_rivers" ? "menu.mapA" : "menu.mapB")}</option>`).join("")}
+            ${MAPS.map((m) => `<option value="${m}" ${this.spCfg.map === m ? "selected" : ""}>${t(getMap(m).nameKey)}</option>`).join("")}
           </select></div>
         <div class="field"><label>${t("menu.difficulty")}</label>
           <select data-id="s-diff">
@@ -149,7 +149,7 @@ export class Menu {
         <div class="lobby-cols">
           <div class="lobby-main">
             <div class="field"><label>${t("menu.map")}</label>
-              <select data-id="l-map">${MAPS.map((m) => `<option value="${m}" ${st.map === m ? "selected" : ""}>${t(m === "twin_rivers" ? "menu.mapA" : "menu.mapB")}</option>`).join("")}</select>
+              <select data-id="l-map">${MAPS.map((m) => `<option value="${m}" ${st.map === m ? "selected" : ""}>${t(getMap(m).nameKey)}</option>`).join("")}</select>
               <div class="mapdesc">${t("lobby.mapDesc." + st.map)}<br><span class="dim">${t("lobby.recommended", { n: getMap(st.map).spawns.length })}</span></div>
             </div>
             <div class="slots" data-id="l-slots">${st.slots.map((s) => this.slotHtml(s)).join("")}</div>
@@ -440,8 +440,8 @@ export class Menu {
     const joinUrl = `${state.hostUrl}/?room=${state.roomCode}`;
 
     const mapField = isHost
-      ? `<select data-id="rl-map">${MAPS.map((m) => `<option value="${m}" ${state.map === m ? "selected" : ""}>${t(m === "twin_rivers" ? "menu.mapA" : "menu.mapB")}</option>`).join("")}</select>`
-      : `<span class="badge">${t(state.map === "twin_rivers" ? "menu.mapA" : "menu.mapB")}</span>`;
+      ? `<select data-id="rl-map">${MAPS.map((m) => `<option value="${m}" ${state.map === m ? "selected" : ""}>${t(getMap(m).nameKey)}</option>`).join("")}</select>`
+      : `<span class="badge">${t(getMap(state.map).nameKey)}</span>`;
 
     const hostControls = `
       <div class="row" style="margin-top:10px">

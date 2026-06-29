@@ -1306,3 +1306,97 @@ single-miner silver rate).
 **[OPT] deferred:** none. (The Engineer retains its oil-derrick capture role; right-clicking a mine
 with a Miner still issues the `mine` command, and right-clicking a derrick with an Engineer still
 captures.) No required T31 scope item is dropped.
+
+
+
+---
+
+## T32 — Bigger fortified multi-base maps, capturable garrisoned outposts (sub-bases) & stronger miner / AI logic  *(map & world enrichment)*
+
+> Source of truth: `../MYSgenerals.md` §24 → T32. **Extends the authoritative simulation** (§3.2) with
+> a new **wall terrain**, a capturable **outpost** neutral (a garrisoned tower that becomes a forward
+> sub-base when captured) and improved miner/AI logic — but introduces **no new netcode**: outposts
+> capture through the existing presence/engineer path and snapshot like the `oil_derrick` neutral, so it
+> behaves identically in single-player, split-screen (T24) and LAN (T25).
+
+**Goal (restated):** make the maps **bigger** with **more bases** like **Dota / Generals** — a few **big**
+fortified main bases **and** several **small** capturable sub-bases — put **obstacles / walls inside the
+bases**, add **capturable garrisoned towers** (simple defenders that never get stronger, used as
+sub-bases, *whoever captures owns them*), enlarge the maps with **walls**, and make the **miner
+mine-finding** and the **AI** logic stronger (fixing the related bugs).
+
+### Scope checklist (T32)
+- [x] A distinct **wall terrain (value 4)** blocks movement, is unbuildable, and renders on the world +
+      minimap (and in the client placement preview).
+- [x] Every main base is **fortified** — a wall on its two centre-facing sides with a wide (5-tile) gate
+      plus cliff obstacle clusters — and the interior + every deposit/outpost stays **reachable** from the
+      spawn (proven by `test/maps.mjs`).
+- [x] A capturable **outpost** neutral exists: a garrisoned tower that **fires on intruders**, is
+      **invulnerable to direct attack**, has **no veterancy/level scaling** (never gets stronger), and is
+      captured by **presence** (12 s) or by an Engineer; on capture it **fires for the new owner**, grants
+      vision, and is **re-capturable**.
+- [x] An **owned outpost is a build anchor** (forward sub-base) for `placementValid()`, but is **not** a
+      Command Center for win/lose.
+- [x] The shipped maps are **bigger** (Twin Rivers 64→**80²**, Crossfire 72→**88²**) and gain fortified
+      bases + outposts + walls + more/contested deposits; a **new big 4-base map `iron_crossroads` (96²)**
+      is added and selectable, with a trilingual name + description and a `nameKey`-driven map label (the
+      old hard-coded "mapA/mapB" binary is gone).
+- [x] **Miner mine-finding** is **reachability-aware** — it picks the nearest *reachable* free mine and a
+      miner stuck on an unreachable claim re-routes — so miners never stall on a mine they can't path to.
+- [x] The **AI** contests/garrisons outposts, builds a stronger economy and now **reliably tech-ups to a
+      Barracks and fields an army** (the pre-existing "never builds military" stall is fixed); SP /
+      split-screen (T24) / LAN (T25) regress cleanly.
+- [x] All new strings are **trilingual** (uz/ru/en, Uzbek U+02BB/U+02BC); `localeParity()` passes.
+- [x] New + existing **headless tests pass**; `bash build.sh` is clean.
+
+### Implementation summary
+- **`src/types.ts` / `src/constants.ts` / `src/data.ts`:** `NeutralId` gains `outpost`; new capture
+  constants (`DERRICK_CAPTURE_TIME` 6 s, `OUTPOST_CAPTURE_TIME` 12 s, `OUTPOST_CAPTURE_RADIUS` 3.2,
+  `OUTPOST_CAPTURE_BOUNTY` 25); a `NEUTRAL_DEFS` table giving the oil derrick + the **outpost** their
+  hp / vision / radius / footprint and the outpost its **garrison weapon** (a fixed bullet gun).
+- **`src/sim/map.ts`:** rewritten — a terrain value `4` = WALL; `fortifyBase()` walls each base's two
+  centre-facing sides with a 5-tile gate + cliff cover; `baseDeposits()` places per-base iron/gold inside
+  the walls; the two shipped maps are enlarged + fortified with outposts; a new **`iron_crossroads`** big
+  4-base map adds a walled central cross, six outposts and contested resources; `MAP_IDS` lists all three.
+- **`src/sim/world.ts`:** the NavGrid blocks wall terrain; `spawn()` reads `NEUTRAL_DEFS` (so the outpost
+  gets its garrison weapon and fires via the normal combat loop); `setupNeutrals()` spawns each neutral's
+  own kind; `captureSystem()` is generalised to capture **both** the derrick and the outpost (own
+  timings/rewards); `placementValid()` treats an **owned outpost** as a build anchor; **`autoAssignMiner()`
+  is reachability-aware** (nearest *reachable* free mine) and `workerSystem()` re-routes a miner that
+  can't reach its claim (a new `mineRetry` counter) instead of stalling.
+- **`src/render/renderer.ts`:** a fifth `TERRAIN_COLORS` entry (stone wall) and a `drawOutpost()` (a stone
+  fortress with crenellations, a team-coloured banner, a rotating garrison turret and a capture ring).
+- **`src/client/worldView.ts`:** the client placement mirror blocks wall terrain and treats an owned
+  outpost as a build anchor (+ blocks its tiles).
+- **`src/sim/ai.ts`:** stronger economy (saturates to 3–4 silver mines so it can afford the iron/gold
+  mines that gate the tech tree), an **early hero oil-derrick grab** for income, and an army squad that
+  **contests outposts** (sub-bases) over derricks.
+- **`src/i18n.ts` / `src/ui/menu.ts`:** `buildings.outpost.name`, `menu.mapC` and the three map
+  descriptions in en/ru/uz; the menu/lobby map labels now use `getMap(id).nameKey` (third map supported).
+
+### How each DoD line was verified
+**Quality gate.** `bash build.sh` compiles client + server with **zero TS errors**. **Twenty-nine**
+suites pass: the prior twenty-six plus three new T32 suites — `maps`, `outpost`, `minefind`.
+
+- **Bigger fortified, reachable maps.** `test/maps.mjs` asserts all three maps' enlarged sizes + spawn
+  counts, that each has **wall** and **cliff** terrain, that every spawn can **path to the centre through
+  its gate**, that every deposit sits on buildable grass and is reachable, that every outpost/derrick is
+  on clear reachable grass, and that a full base + the neutral garrison spawn cleanly.
+- **Outpost = garrisoned, invulnerable, capturable sub-base.** `test/outpost.mjs` proves the outpost
+  starts neutral with a garrison weapon, **fires on an intruder** and **never gains rank/level**, is
+  **immune** to splash + attack orders, is **captured by presence** (a heavy tank out-stays its fire) and
+  is **only captured, never destroyed**, becomes a **build anchor** that **fires for its new owner**, and
+  that owning one does **not** satisfy the Command-Center win condition.
+- **Reachability-aware miners.** `test/minefind.mjs` builds a wall-split arena and shows
+  `autoAssignMiner()` picks the **reachable** mine over a nearer **walled-off** one, and a miner forced
+  onto an unreachable claim **re-routes** to the reachable mine and digs.
+- **Stronger AI (verified by self-play).** A headless 20-minute 4-AI self-play on the new map shows each
+  AI reaching **Command Center Lvl 2**, building a **Barracks**, fielding an **army (5–9 units)** and
+  **capturing 3–4 outposts** — versus the pre-T32 build, which never built any military in the same time.
+- **Trilingual + parity / no regression.** `localeParity()` passes with the new keys (Uzbek U+02BB). All
+  prior suites — including `host`/`net`/`stress` (anti-maphack / fog), `minework`, `workers`, `basetech`,
+  `placement` — stay green; the sim/netcode/split-screen routing are only extended, not altered.
+
+**[OPT] deferred:** outposts give **no passive income** (they are defensive sub-bases, not mines — income
+still comes from mines and oil derricks); the AI's early hero derrick-grab is best-effort (it prioritises
+the closer outpost sub-bases). No required T32 scope item is dropped.

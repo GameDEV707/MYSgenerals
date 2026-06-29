@@ -1,5 +1,5 @@
 // MYS Generals — stat tables (spec §7, §8, §11, §13). Numbers are canonical from the spec.
-import { ArmorType, DamageType, UnitDef, BuildingDef, UnitId, BuildingId, NeutralId, Cost } from "./types.js";
+import { ArmorType, DamageType, UnitDef, BuildingDef, UnitId, BuildingId, NeutralId, Cost, Weapon } from "./types.js";
 
 // Damage-type x armor-type matrix as multipliers (spec §13.1 / §26.3), percentages -> fractions.
 const M: Record<DamageType, Record<ArmorType, number>> = {
@@ -145,7 +145,24 @@ export const BUILDING_DEFS: Record<BuildingId, BuildingDef> = {
   },
 };
 
-export const NEUTRAL_VISION: Record<NeutralId, number> = { oil_derrick: 5 };
+export const NEUTRAL_VISION: Record<NeutralId, number> = { oil_derrick: 5, outpost: 8 };
+
+// ---- T32: neutral structure definitions (spec §24 → T32 Part B). The oil derrick is a pure income
+// point; the OUTPOST is a garrisoned defensive tower (a fixed-strength gun — no veterancy / no level
+// scaling, it never gets stronger) that fires on any intruding non-owner unit. It is invulnerable to
+// direct attack (like every neutral) — you take it by out-staying its fire, and on capture it becomes
+// a forward SUB-BASE (a build anchor) that fights for its new owner. `spawn()` reads this table. ----
+export interface NeutralDef {
+  hp: number; vision: number; radius: number; footprint: number;
+  nameKey: string; icon: string; weapon?: Weapon;
+}
+export const NEUTRAL_DEFS: Record<NeutralId, NeutralDef> = {
+  oil_derrick: { hp: 800, vision: 5, radius: 1.2, footprint: 3, nameKey: "buildings.oilDerrick.name", icon: "🛢" },
+  outpost: {
+    hp: 1600, vision: 8, radius: 1.3, footprint: 3, nameKey: "buildings.outpost.name", icon: "🏯",
+    weapon: { damage: 20, damageType: "Bullet", range: 7, cooldown: 0.7, projectile: "tracer", projectileSpeed: 0, targetsGround: true, targetsAir: true, preferred: "InfantryLight" },
+  },
+};
 
 // ---- T26: Research Center catalog (spec §24 → T26 Part C). Each research is a ONE-TIME global
 // upgrade with a cost (paid on start) and a research time (a progress bar on the building). `level`

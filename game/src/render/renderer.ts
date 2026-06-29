@@ -8,7 +8,7 @@ import { DEFENSE_RANGE_PER_LEVEL } from "../constants.js";
 import { FxRenderer } from "./fx.js";
 
 export interface Cam { x: number; y: number; zoom: number; }
-const TERRAIN_COLORS = ["#3c5a3a", "#5a5048", "#26506b", "#6b6258"]; // grass, cliff, water, road
+const TERRAIN_COLORS = ["#3c5a3a", "#5a5048", "#26506b", "#6b6258", "#71727a"]; // grass, cliff, water, road, wall (T32)
 
 // ---- T26 Part D: per-unit-type silhouette descriptors. `unitShape(type)` is a PURE function
 // (no DOM/canvas) returning a small, DISTINCT descriptor for each of the 11 unit types, so it is
@@ -336,6 +336,7 @@ export class Renderer {
   private drawNeutral(e: ViewEntity): void {
     const ctx = this.ctx, z = this.cam.zoom; const s = 2.2 * z;
     const x = this.toX(e.pos.x), y = this.toY(e.pos.y);
+    if (e.type === "outpost") { this.drawOutpost(e, x, y, z); return; }
     ctx.fillStyle = "#2a2018"; this.roundRect(x - s / 2, y - s / 2, s, s, 4); ctx.fill();
     ctx.strokeStyle = this.teamColor(e.owner); ctx.lineWidth = 2; this.roundRect(x - s / 2, y - s / 2, s, s, 4); ctx.stroke();
     ctx.fillStyle = "#dfe7ee"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `${Math.floor(s * 0.5)}px serif`;
@@ -345,6 +346,29 @@ export class Renderer {
     if (e.captureProgress > 0) {
       ctx.strokeStyle = this.teamColor(e.captureOwner); ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(x, y, s * 0.7, -Math.PI / 2, -Math.PI / 2 + e.captureProgress * Math.PI * 2); ctx.stroke();
+    }
+    if (this.selection.has(e.id)) this.drawSelection(e, s * 0.6);
+  }
+
+  // T32: a capturable garrisoned outpost (sub-base) — a stone fortress with crenellations, a team-
+  // coloured banner (neutral = grey), a rotating garrison turret, and a capture ring while contested.
+  private drawOutpost(e: ViewEntity, x: number, y: number, z: number): void {
+    const ctx = this.ctx; const s = 2.6 * z; const col = this.teamColor(e.owner);
+    ctx.fillStyle = "#2b3038"; this.roundRect(x - s / 2, y - s / 2, s, s, 5); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 2.5; this.roundRect(x - s / 2, y - s / 2, s, s, 5); ctx.stroke();
+    // crenellations along the top
+    ctx.fillStyle = "#3a414b";
+    for (let i = 0; i < 4; i++) { ctx.fillRect(x - s / 2 + i * s / 4 + s * 0.04, y - s / 2 - s * 0.1, s * 0.16, s * 0.16); }
+    // garrison turret
+    ctx.strokeStyle = "#cfd8e0"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(e.turret) * s * 0.45, y + Math.sin(e.turret) * s * 0.45); ctx.stroke();
+    ctx.fillStyle = "#cfd8e0"; ctx.beginPath(); ctx.arc(x, y, s * 0.18, 0, Math.PI * 2); ctx.fill();
+    // banner pole + flag
+    ctx.strokeStyle = "#888"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y - s * 0.55); ctx.lineTo(x, y - s * 0.95); ctx.stroke();
+    ctx.fillStyle = col; ctx.fillRect(x, y - s * 0.95, s * 0.3, s * 0.18);
+    if (e.captureProgress > 0) {
+      ctx.strokeStyle = this.teamColor(e.captureOwner); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, s * 0.66, -Math.PI / 2, -Math.PI / 2 + e.captureProgress * Math.PI * 2); ctx.stroke();
     }
     if (this.selection.has(e.id)) this.drawSelection(e, s * 0.6);
   }

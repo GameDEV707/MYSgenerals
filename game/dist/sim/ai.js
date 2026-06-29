@@ -77,7 +77,10 @@ export class AIController {
             this.build("power_plant");
             return;
         }
-        if (this.owned("silver_mine").length < 2 && p.silver >= 15) {
+        // T32: a stronger income engine — saturate to three silver mines early so the AI can actually
+        // afford the iron/gold mines that gate the tech tree (previously it stalled at two and never had
+        // the silver+gold to reach a Barracks, so it never fielded an army).
+        if (this.owned("silver_mine").length < 3 && p.silver >= 15) {
             this.build("silver_mine");
             return;
         }
@@ -129,7 +132,7 @@ export class AIController {
             return;
         }
         // keep expanding economy when flush
-        if (p.silver >= 60 && this.owned("silver_mine").length < 3) {
+        if (p.silver >= 60 && this.owned("silver_mine").length < 4) {
             this.build("silver_mine");
             return;
         }
@@ -273,15 +276,43 @@ export class AIController {
         }
     }
     manageCapture(p) {
-        // send a spare engineer/army to nearest neutral derrick occasionally
-        const derrick = this.world.entities.find((e) => e.type === "oil_derrick" && e.owner !== this.owner && !e.dead);
-        if (!derrick)
+        const cc = this.cc();
+        if (!cc)
             return;
+        const farLimit = this.world.map.w * 0.6;
+        const derricks = this.world.entities.filter((e) => e.type === "oil_derrick" && e.owner !== this.owner && !e.dead);
+        const outposts = this.world.entities.filter((e) => e.type === "outpost" && e.owner !== this.owner && !e.dead);
+        // T32: EARLY economy boost — grab the nearest neutral oil derrick with the idle hero (presence
+        // capture; a derrick pays +1 silver / 5 s, which meaningfully accelerates the tech chain). Only
+        // when we own no derrick yet and it isn't suicidally far across the map.
+        const ownsDerrick = this.world.entities.some((e) => e.type === "oil_derrick" && e.owner === this.owner && !e.dead);
+        const hero = p.heroId ? this.world.byId.get(p.heroId) : undefined;
+        if (!ownsDerrick && derricks.length && hero && !hero.dead) {
+            const d = derricks.slice().sort((a, b) => this.world.dist(a.pos, cc.pos) - this.world.dist(b.pos, cc.pos))[0];
+            if (this.world.dist(d.pos, cc.pos) < farLimit && hero.path.length === 0 && hero.target == null && this.world.dist(hero.pos, d.pos) > 2.5) {
+                this.world.issue({ t: "move", ids: [hero.id], x: d.pos.x, y: d.pos.y });
+            }
+        }
+        // Army squad contests the capturable sub-bases. Prefer an OUTPOST (forward base + defense) over a
+        // derrick, nearest first. Peel a small idle squad — but only when we're not committed to an
+        // all-out attack (avoids army thrash).
+        if (this.attacking)
+            return;
+        const targets = [...outposts, ...derricks];
+        if (!targets.length)
+            return;
+        targets.sort((a, b) => {
+            const pa = a.type === "outpost" ? 0 : 1, pb = b.type === "outpost" ? 0 : 1;
+            if (pa !== pb)
+                return pa - pb;
+            return this.world.dist(a.pos, cc.pos) - this.world.dist(b.pos, cc.pos);
+        });
+        const tgt = targets[0];
         const army = this.army();
-        if (army.length > this.armyThreshold + 2) {
-            // peel one unit to capture by presence
-            const u = army[0];
-            this.world.issue({ t: "move", ids: [u.id], x: derrick.pos.x, y: derrick.pos.y });
+        if (army.length >= Math.max(3, this.armyThreshold - 2)) {
+            const squad = army.filter((a) => a.path.length === 0 && a.target == null).slice(0, 3);
+            if (squad.length)
+                this.world.issue({ t: "attackmove", ids: squad.map((a) => a.id), x: tgt.pos.x, y: tgt.pos.y });
         }
     }
 }

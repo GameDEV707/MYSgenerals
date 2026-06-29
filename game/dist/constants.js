@@ -7,6 +7,13 @@ export const SILVER_MINE_SLOTS = 3; // work slots (§26.1)
 export const IRON_INTERVAL = 15; // +1 iron / 15 s
 export const GOLD_INTERVAL = 30; // +1 gold / 30 s
 export const OIL_INTERVAL = 5; // captured oil derrick: +1 silver / 5 s (§12.1)
+// ---- T32: neutral capture timings (spec §24 → T32 Part B) ----
+// The oil derrick is a quick income point; the garrisoned outpost is a fought-over sub-base, so it
+// takes longer to take by presence. Both can also be taken by an Engineer channel.
+export const DERRICK_CAPTURE_TIME = 6; // seconds of single-owner presence to flip an oil derrick
+export const OUTPOST_CAPTURE_TIME = 12; // seconds of single-owner presence to flip an outpost
+export const OUTPOST_CAPTURE_RADIUS = 3.2; // presence radius around an outpost
+export const OUTPOST_CAPTURE_BOUNTY = 25; // small silver reward on first capture of an outpost
 export const CC_POWER = 5; // Command Center base power (§6.2)
 export const POWER_PLANT_OUTPUT = 10; // §26.1
 // Brown-out penalties (§6.4)

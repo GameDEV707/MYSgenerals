@@ -1089,7 +1089,7 @@ Single-player needs a competent AI so the game is fun solo. The AI runs **on the
 
 ---
 
-## 24. BUILD TASK PLAN (T0 – T28)
+## 24. BUILD TASK PLAN (T0 – T29)
 
 Tasks are **ordered**. Each has a **Goal**, a **Scope checklist** (every box must be checked), and a **Definition of Done (DoD)**. A task ships only when all boxes are checked and all DoD lines pass. Tasks reference the design sections above for exact numbers and behaviors. Every animation/VFX listed in §16 for a feature is part of that feature's task — "functional but no animation" is **not** done.
 
@@ -1806,6 +1806,63 @@ DoD: in a match, **Player 1 using only the keyboard** selects a miner, presses *
 - [ ] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24) and LAN (T25) regress cleanly.
 
 DoD: in a match, the **hero ability panel is hidden** until the hero is selected, then appears **tidily in the command-panel area** (with `★ Lvl`, HP/mana and abilities) with **no overlap** on the Stop/Hold/Attack-Move / build controls — for **every** player; the **on-map** hero level pip is unchanged. The **power economy is honest**: at **≥ 90%** usage a **LOW POWER** warning shows, and a power-hungry building that there isn't enough power for is **refused** ("not enough power") instead of silently building, while power plants always build. **Player 1 on the keyboard** can **zoom in with `Shift` and out with `Ctrl`** (remappable). Verifiable headlessly: the `tryBuild` power gate (reject/allow + toast), the `zoomIn`/`zoomOut` bindings + `cam.zoom` change, and the hero-panel visibility predicate all pass; `bash build.sh` is clean and every suite is green; all UI reads correctly in uz/ru/en.
+
+---
+
+### T29 — Unobstructed placement, cancel-build, mine extraction countdown & resource mine emblems  *(build-flow & economy readability)*
+
+**Goal:** three readability fixes reported in play (see the reported screenshot: the **MINER — BUILD** panel, the selection panel and the minimap cover a large part of the battlefield while placing a building): (1) when the player has **picked something to build** and is choosing where to put it, the **HUD panels that cover the map must hide** so the placement is unobstructed — and there must be a clear **Cancel-build** control to back out of placement (today you can only press Esc / right-click, which a touch or keyboard player can't discover); (2) when a **resource mine is selected**, show **how long until the next unit of metal is extracted** (a countdown / progress to the next `+1`), so the player can see their income cadence; (3) give each resource mine a **distinct resource-coloured emblem** — **gold** on the Gold Mine, **silver** on the Silver Mine (and **iron** on the Iron Mine) — both **on the map** and on the **build-menu button**, so the three mines are instantly tellable apart (today they are near-identical grey icons).
+
+**Why this task (current defects, with file references):**
+- **Build panels cover the map.** `ui/hud.ts` keeps the `cmdpanel`, `selinfo`, `herobar` and `minimap-wrap` widgets visible at all times; while `render/renderer.ts drawPlacement()` shows the placement ghost (driven by `r.placing`), those panels still occupy the lower third of the screen, so the player can't see where they're dropping the building (the reported screenshot).
+- **Cancelling placement is hidden.** Placement is only cancelled via Esc or right-click (`input.ts` — `this.r.placing = null` in `onKey`/`onRightClick`). There is **no on-screen Cancel button**, so a touch player (T23) or a keyboard player (T24) has no discoverable way to abort a build they started.
+- **No income cadence feedback.** `sim/world.ts economySystem()` accumulates `resAccum` per mine and emits `+1` every `MINER_OUTPUT_INTERVAL` (silver, scaled by `minerSlots`), `IRON_INTERVAL` (iron) or `GOLD_INTERVAL` (gold); selecting a mine shows only its HP — the player can't see **time-to-next-extraction**.
+- **Mines look alike.** `render/renderer.ts drawBuilding()` draws each building's generic `def.icon`; the Silver / Iron / Gold mines read as similar grey tiles on the map (and similar buttons in `ui/hud.ts buildBtn()`), so it's hard to tell which mine is which at a glance.
+
+> Scope note: **UI/UX + a read-only economy readout**. Exposing the mine countdown is a snapshot-only addition (host computes ETA for the owner's own mines, like the existing per-building queue data); it does **not** change the simulation, the `Command` union, the netcode, or the T23/T24 split-screen routing. Regress cleanly in single-player, split-screen (T24) and LAN (T25).
+
+---
+
+#### Part A — Unobstructed placement + a Cancel-build control
+
+**A1. Hide map-covering panels while placing.** Whenever placement mode is active (`r.placing` set — the player picked a building to position), **hide** the HUD widgets that cover the battlefield (`cmdpanel`, `selinfo`, `herobar`; keep the small top resource bar). Restore them the instant placement ends (placed, cancelled, or Esc). This must work for every control scheme (mouse, touch P1/P2, keyboard P1).
+**A2. Cancel-build control.** Show a clearly-labelled **Cancel** button (`cmd.cancelBuild`) during placement that aborts it (calls `input.setPlacing(null)`), in addition to the existing Esc / right-click. It must be reachable by **touch and keyboard** players (e.g. a small floating "Cancel build" button near the placement ghost or a fixed corner button), and the keyboard player can also cancel with their existing cancel key. After cancelling, the panels from A1 reappear.
+**A3. No bleed / split-safe.** Hiding/showing applies per-HUD-instance (each split-screen side independently), so Player 1 entering placement does not blank Player 2's panels.
+
+#### Part B — Mine extraction countdown
+
+**B1. Expose ETA.** For the **local player's own** resource mines (`silver_mine`, `iron_mine`, `gold_mine`, and the captured `oil_derrick`), the host adds the **seconds-to-next-output** to the entity snapshot (computed from `resAccum` and the relevant interval — for silver, accounting for `minerSlots`; a mine with no active miners reports "idle"). Enemy mines are fog-filtered as today.
+**B2. Show it on select.** When such a mine is selected, the selection panel shows a **countdown to the next `+1`** (a small "next in {n}s" line and/or a progress ring), plus which resource it yields. An idle silver mine (no miners assigned) shows an "idle / assign miners" hint instead of a countdown.
+**B3.** Optional on-map cue: a thin progress ring over the selected own mine showing fill toward the next unit (consistent with the T26/T27 overlay layout, no overlap).
+
+#### Part C — Resource-coloured mine emblems
+
+**C1. On the map.** `render/renderer.ts drawBuilding()` draws a **resource-coloured emblem** for each mine type so they're unmistakable: **silver** (bright silver/white) for the Silver Mine, **gold** (yellow) for the Gold Mine, **iron** (dark steel) for the Iron Mine — e.g. a coloured gem/ingot badge on the building tile, keeping the team-colour outline.
+**C2. In the build menu.** The Silver / Iron / Gold Mine **buttons** in `ui/hud.ts buildBtn()` carry the same resource-coloured emblem so the menu options are equally distinct (the reported screenshot shows them as similar grey icons).
+**C3.** Colours match the existing resource palette already used for the floating `+1` text and the top resource bar (silver `#c9d1d9`, iron `#8c98a4`, gold `#ffd23f`) for consistency.
+
+---
+
+#### Cross-cutting
+
+**i18n.** Add every new user-facing string in **uz/ru/en** with correct Uzbek orthography (U+02BB `ʻ`, U+02BC `ʼ`): the Cancel-build label (`cmd.cancelBuild`), the mine "next in {n}s" / "idle" lines. `localeParity()` must stay green; no hard-coded strings.
+
+**Tests (headless, dependency-free, in `test/`).** Add/extend suites and keep all existing green:
+- **mine ETA**: a pure helper computes seconds-to-next-output from `resAccum` + interval (and `minerSlots` for silver), reports "idle" for a silver mine with no miners, and counts down as `resAccum` rises; verified across silver/iron/gold.
+- **placement HUD visibility**: a pure predicate (e.g. `panelsHiddenDuringPlacement(placing)`) returns true while `r.placing` is set and false otherwise, and the Cancel action clears `r.placing`.
+- (extend existing input tests if a binding is added for keyboard cancel-build.)
+
+**Docs.** On implementation, add a **T29 section to `PROGRESS.md`** in the T24–T28 style (Scope checklist, "How each DoD line was verified", "[OPT] deferred"), and update `README.md` (placement hides panels + Cancel-build; mine extraction countdown; resource-coloured mine emblems).
+
+### Scope checklist (T29)
+- [ ] Entering build-placement **hides** the map-covering HUD panels (command, selection, hero) and restores them when placement ends; works for mouse, touch and keyboard, per split-screen side.
+- [ ] A discoverable **Cancel-build** control aborts placement (touch/keyboard reachable), alongside Esc / right-click; panels reappear afterward.
+- [ ] Selecting an **own resource mine** shows the **time until the next metal is extracted** (countdown / progress), and an idle silver mine shows an "assign miners" hint; enemy mines stay fog-filtered.
+- [ ] The **Silver / Iron / Gold mines** show **distinct resource-coloured emblems** on the **map** and in the **build menu** (silver/iron/gold palette).
+- [ ] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography); `localeParity()` passes.
+- [ ] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24) and LAN (T25) regress cleanly.
+
+DoD: when the player picks a building to place, the **command / selection / hero panels disappear** so the **battlefield is fully visible** for positioning, with a clear **Cancel-build** button (plus Esc / right-click) to back out — and the panels return the moment placement ends. Selecting one of the player's **mines** shows a **countdown to the next `+1`** of its resource (idle silver mines prompt to assign miners). On the map and in the build menu, the **Gold Mine reads gold, the Silver Mine silver, the Iron Mine iron** at a glance. Verifiable headlessly: the mine-ETA helper, the placement-visibility predicate + cancel-clears-placing, all pass; `bash build.sh` is clean and every suite is green; all UI reads correctly in uz/ru/en.
 
 ---
 

@@ -176,6 +176,9 @@ const en: Dict = {
   "mine.idle": "Idle — no miners",
   "mine.assignMiners": "Assign a miner to start mining",
   "mine.yields": "Yields {res}",
+  "mine.assign": "Send miner to mine",
+  "mine.noFree": "No free mine — build a new one",
+  "mine.free": "Free",
 
   "units.miner.name": "Miner",
   "units.engineer.name": "Engineer",
@@ -454,6 +457,9 @@ const ru: Dict = {
   "mine.idle": "Простаивает — нет шахтёров",
   "mine.assignMiners": "Назначьте шахтёра, чтобы начать добычу",
   "mine.yields": "Добывает: {res}",
+  "mine.assign": "Отправить шахтёра в шахту",
+  "mine.noFree": "Нет свободных шахт — постройте новую",
+  "mine.free": "Свободна",
 
   "units.miner.name": "Шахтёр",
   "units.engineer.name": "Инженер",
@@ -732,6 +738,9 @@ const uz: Dict = {
   "mine.idle": "Boʻsh — konchilar yoʻq",
   "mine.assignMiners": "Qazib olishni boshlash uchun konchi tayinlang",
   "mine.yields": "Qazib oladi: {res}",
+  "mine.assign": "Konchini konga yuborish",
+  "mine.noFree": "Boʻsh kon yoʻq — yangi quring",
+  "mine.free": "Boʻsh",
 
   "units.miner.name": "Konchi",
   "units.engineer.name": "Muhandis",

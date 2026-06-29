@@ -203,7 +203,7 @@ export class WorldView {
         ve.bays = es.bay ?? 1;
         ve.speedLevel = es.spd ?? 0;
         ve.researching = es.rs ? { id: es.rs.id, progress: es.rs.progress, time: es.rs.time } : null;
-        ve.mineEta = es.mn ? { seconds: es.mn.idle ? null : es.mn.s, progress: es.mn.p, resource: es.mn.res, idle: es.mn.idle } : null;
+        ve.mineEta = es.mn ? { seconds: es.mn.idle ? null : es.mn.s, progress: es.mn.p, resource: es.mn.res, idle: es.mn.idle, free: es.mn.free ?? true } : null;
         ve.level = es.lvl ?? 1;
         ve.upgrading = es.up ? { to: es.up.to, progress: es.up.progress, time: es.up.time } : null;
         if (es.hero) {

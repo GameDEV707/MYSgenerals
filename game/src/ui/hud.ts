@@ -197,7 +197,14 @@ export class HUD {
     // T27 Part A: category-focus only applies to the builder build panel; drop it otherwise.
     const builderPanel = !!builder && !research && !prod;
     if (!builderPanel && this.catFocus >= 0) this.catFocus = -1;
+    const panel = this.q("cmdpanel"); if (!panel) return;
+    // Nothing of the player's own is selected → hide the command panel entirely (no placeholder
+    // panel floating over the battlefield). The selection info box still describes a clicked enemy.
+    if (own.length === 0) { panel.style.display = "none"; this.sig = ""; return; }
     const kb = this.input.control === "p1-keyboard" ? "K" : "";
+    // T-fix: when only miners are selected the panel lists the player's assignable (free) mines, so
+    // it must re-render when a mine frees up / is taken. Fold the free-mine set into the signature.
+    const onlyMiners = own.length > 0 && own.every((e) => e.type === "miner");
     // T30: include each own building's level + whether it is upgrading (NOT progress — the live bar
     // is drawn on the map), and the player's base level (drives the build-menu locks), so the panel
     // rebuilds when the CC levels up or a tower upgrade completes/starts.
@@ -205,7 +212,7 @@ export class HUD {
       + "|" + this.tab + "|" + kb + (builder ? "b" : "") + "|F" + this.catFocus + "|BL" + this.baseLevel();
     if (prod) sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".");
     if (research) { const r = this.me().research; sig += "|R" + research.id + ":" + (research.researching ? "act" + research.researching.id : "idle") + ":" + r.weapons + r.armor + r.factoryTech + (r.logistics ? 1 : 0); }
-    const panel = this.q("cmdpanel"); if (!panel) return;
+    if (onlyMiners) sig += "|MN" + this.assignableMines().map((m) => m.id + (m.mineEta?.resource ?? "")).join(".");
     panel.style.display = this.layout.commands?.hidden ? "none" : ""; // restore after placement ends
     if (sig !== this.sig) { this.sig = sig; panel.innerHTML = this.panelHtml(own, builder, prod, research); this.decorateNumberBadges(panel); }
     if (prod) this.updateProdLive(panel, prod);
@@ -264,6 +271,11 @@ export class HUD {
       return `<h4>${t("units.engineer.name")} — ${t("cat.build")}</h4>
         <div class="tabs">${tabs}</div><div class="grid">${list}</div>`;
     }
+    // Miner(s) selected → a miner-specific panel: pick which FREE mine to work (named, resource-
+    // coloured). Only mines with a spare slot are listed; an occupied/claimed mine is not offered.
+    if (own.length > 0 && own.every((e) => e.type === "miner")) {
+      return this.minerPanelHtml();
+    }
     if (own.some((e) => e.kind === "unit")) {
       return `<h4>${t("hud.unitsSelected", { count: own.length })}</h4>
         <div class="grid">
@@ -280,7 +292,30 @@ export class HUD {
       return `<h4>${t(def0.nameKey)}</h4>
         <div class="grid"><div class="cmd" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div></div>`;
     }
-    return `<h4>MYS Generals</h4><div style="font-size:12px;color:var(--text-dim)">${t("menu.singlePlayer")}</div>`;
+    return ""; // nothing own selected → panel hidden (no placeholder)
+  }
+
+  // The player's own mines that still have a spare slot (no miner inside AND none walking to claim
+  // it) — i.e. genuinely assignable. `mineEta` is sent for own mines only; `free` is the host's
+  // claimed-slot check. Built (non-constructing) mines only.
+  private assignableMines(): ViewEntity[] {
+    return this.world.entities.filter((e) => e.owner === this.world.me && !e.constructing && !!e.mineEta && e.mineEta.free === true);
+  }
+
+  // Miner command panel: a button per assignable mine (named, resource-coloured gem). Clicking one
+  // sends the selected miner(s) to work it. If no mine is free, prompt to build one.
+  private minerPanelHtml(): string {
+    const head = `<h4>${t("units.miner.name")} — ${t("mine.assign")}</h4>`;
+    const mines = this.assignableMines();
+    if (!mines.length) return `${head}<div style="font-size:12px;color:var(--text-dim)">${t("mine.noFree")}</div>`;
+    const btns = mines.map((m) => {
+      const nameKey = m.type === "oil_derrick" ? "buildings.oilDerrick.name" : BUILDING_DEFS[m.type as BuildingId].nameKey;
+      const res = (m.mineEta?.resource ?? "silver") as "silver" | "iron" | "gold";
+      const col = RESOURCE_COLORS[res] || "#c9d1d9";
+      return `<div class="cmd gridbtn" data-act="mineassign" data-mine="${m.id}" title="${t(nameKey)} — ${t("mine.yields", { res: t("hud." + res) })}">
+        <span class="ic mine-emblem" style="color:${col}">◆</span><span>${t(nameKey)}</span><span class="cost">${t("mine.free")}</span></div>`;
+    }).join("");
+    return `${head}<div class="grid">${btns}</div>`;
   }
 
   // Producing-building panel: train buttons + factory upgrades + live FIFO queue strip (T26 A/B).
@@ -467,6 +502,12 @@ export class HUD {
       this.input.setPlacing(el.dataset.b as BuildingId); this.audio.play("click"); return;
     }
     if (act === "train") { this.input.trainFromSelection(el.dataset.u as UnitId); this.audio.play("click"); return; }
+    if (act === "mineassign") {
+      const mineId = parseInt(el.dataset.mine || "0", 10);
+      const miners = this.selectedEntities().filter((e) => e.owner === me && e.type === "miner").map((e) => e.id);
+      if (mineId && miners.length) this.world.send({ t: "mine", ids: miners, target: mineId });
+      this.audio.play("click"); return;
+    }
     if (act === "upgrade") {
       const kind = el.dataset.kind as "bay" | "speed" | "level";
       // T30: a level upgrade applies to the Command Center or a defensive tower (not just producers).
@@ -571,7 +612,10 @@ export class HUD {
       : e.kind === "neutral" ? t("buildings.oilDerrick.name") : t(UNIT_DEFS[e.type as UnitId].nameKey);
     const chev = e.rank > 0 ? `<span class="chev">${"›".repeat(e.rank)}</span>` : "";
     let extra = "";
-    if (e.hero) { const p = this.world.players[e.owner]; extra = `<div style="font-size:12px">Lvl ${p.heroLevel}</div><div class="bar mana"><div class="fill" style="width:${e.hero.mana / e.hero.maxMana * 100}%"></div></div>`; }
+    // The hero's LEVEL is shown inline next to its name (after "Hero/Qahramon"), not as a separate
+    // big block in the hero bar. Only the mana bar lives in `extra`.
+    let nameSuffix = "";
+    if (e.hero) { const p = this.world.players[e.owner]; nameSuffix = ` <span class="sel-lvl">${t("hud.level", { n: p.heroLevel })}</span>`; extra = `<div class="bar mana"><div class="fill" style="width:${e.hero.mana / e.hero.maxMana * 100}%"></div></div>`; }
     // T29 Part B: for the local player's own resource mines, show the extraction countdown to the
     // next +1 (or an "assign miners" hint for an idle silver mine) plus which resource it yields.
     if (e.owner === this.world.me && e.mineEta) extra += this.mineEtaHtml(e.mineEta);
@@ -586,7 +630,7 @@ export class HUD {
         extra += `<div class="defstats">${t("hud.level", { n: e.level })}</div>`;
       }
     }
-    box.innerHTML = `<div class="name">${name} ${chev}</div>
+    box.innerHTML = `<div class="name">${name} ${chev}${nameSuffix}</div>
       <div class="bar"><div class="fill" style="width:${Math.max(0, e.hp / e.maxHp * 100)}%"></div></div>
       <div style="font-size:12px;color:var(--text-dim)">HP ${Math.ceil(e.hp)}/${e.maxHp}</div>
       ${extra}
@@ -641,7 +685,6 @@ export class HUD {
       </div>`;
     }).join("");
     bar.innerHTML = `<div class="hero-portrait">
-        <div class="lvl">★ Lvl ${p.heroLevel}</div>
         <div class="bar"><div class="fill" style="width:${hero.hp / hero.maxHp * 100}%"></div></div>
         <div class="bar mana"><div class="fill" style="width:${h.mana / h.maxMana * 100}%"></div></div>
       </div>${abilities}`;

@@ -13,6 +13,7 @@ import { WorldView, ViewEntity, NEUTRAL } from "./client/worldView.js";
 import { AudioManager } from "./render/audio.js";
 import { BuildingId, UnitId } from "./types.js";
 import { getKeyBindings, normalizeKey, Bindings } from "./ui/keyBindings.js";
+import { isMineType } from "./constants.js";
 
 export type ControlMode = "single" | "p1-keyboard" | "p2-mouse";
 
@@ -290,14 +291,22 @@ export class InputController {
       this.world.send({ t: "attack", ids: units, target: tgt.id }); this.audio.play("click");
       this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "attack", "#ff5a4d"); return;
     }
+    // Miner → work an OWNED mine of ANY type (silver / iron / gold / captured oil). Only mines with a
+    // spare slot are accepted; sending a miner to a taken mine is rejected so it doesn't trek over
+    // and then wander off to a distant free mine. (The silver-only check here was the main cause of
+    // miners "staggering" when right-clicked onto iron/gold mines, which fell through to a move.)
+    if (tgt && tgt.owner === me && isMineType(tgt.type)) {
+      const miners = units.filter((id) => this.world.byId.get(id)?.type === "miner");
+      if (miners.length) {
+        if (tgt.mineEta && tgt.mineEta.free === false) { this.audio.play("deny"); return; }
+        this.world.send({ t: "mine", ids: miners, target: tgt.id }); this.audio.play("click");
+        this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "move", "#34d399"); return;
+      }
+    }
     if (tgt && tgt.type === "oil_derrick") {
       const engs = units.filter((id) => this.world.byId.get(id)?.type === "engineer");
       if (engs.length) { this.world.send({ t: "capture", ids: engs, target: tgt.id }); this.audio.play("click"); this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "move", "#ffd23f"); return; }
       this.world.send({ t: "move", ids: units, x: tgt.pos.x, y: tgt.pos.y }); this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "move", "#34d399"); return;
-    }
-    if (tgt && tgt.type === "silver_mine" && tgt.owner === me) {
-      const miners = units.filter((id) => this.world.byId.get(id)?.type === "miner");
-      if (miners.length) { this.world.send({ t: "mine", ids: miners, target: tgt.id }); this.audio.play("click"); this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "move", "#34d399"); return; }
     }
     this.world.send({ t: "move", ids: units, x: w.x, y: w.y });
     this.audio.play("click");

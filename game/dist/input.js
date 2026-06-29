@@ -1,5 +1,6 @@
 import { NEUTRAL } from "./client/worldView.js";
 import { getKeyBindings, normalizeKey } from "./ui/keyBindings.js";
+import { isMineType } from "./constants.js";
 export class InputController {
     constructor(r, world, audio, opts) {
         this.pendingAbility = -1; // -1 none, 0..3 slot awaiting target
@@ -364,6 +365,23 @@ export class InputController {
             this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "attack", "#ff5a4d");
             return;
         }
+        // Miner → work an OWNED mine of ANY type (silver / iron / gold / captured oil). Only mines with a
+        // spare slot are accepted; sending a miner to a taken mine is rejected so it doesn't trek over
+        // and then wander off to a distant free mine. (The silver-only check here was the main cause of
+        // miners "staggering" when right-clicked onto iron/gold mines, which fell through to a move.)
+        if (tgt && tgt.owner === me && isMineType(tgt.type)) {
+            const miners = units.filter((id) => this.world.byId.get(id)?.type === "miner");
+            if (miners.length) {
+                if (tgt.mineEta && tgt.mineEta.free === false) {
+                    this.audio.play("deny");
+                    return;
+                }
+                this.world.send({ t: "mine", ids: miners, target: tgt.id });
+                this.audio.play("click");
+                this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "move", "#34d399");
+                return;
+            }
+        }
         if (tgt && tgt.type === "oil_derrick") {
             const engs = units.filter((id) => this.world.byId.get(id)?.type === "engineer");
             if (engs.length) {
@@ -375,15 +393,6 @@ export class InputController {
             this.world.send({ t: "move", ids: units, x: tgt.pos.x, y: tgt.pos.y });
             this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "move", "#34d399");
             return;
-        }
-        if (tgt && tgt.type === "silver_mine" && tgt.owner === me) {
-            const miners = units.filter((id) => this.world.byId.get(id)?.type === "miner");
-            if (miners.length) {
-                this.world.send({ t: "mine", ids: miners, target: tgt.id });
-                this.audio.play("click");
-                this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "move", "#34d399");
-                return;
-            }
         }
         this.world.send({ t: "move", ids: units, x: w.x, y: w.y });
         this.audio.play("click");

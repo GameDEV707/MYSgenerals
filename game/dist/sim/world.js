@@ -896,6 +896,12 @@ export class World {
                         }
                     }
                 }
+                else if (!e.mining && e.path.length === 0 && e.moveTarget == null) {
+                    // Assigned to a mine but idled SHORT of it (its path ended early — e.g. the approach was
+                    // briefly blocked). Re-issue the move so it keeps heading in instead of standing forever
+                    // (this was a cause of miners stalling near a mine without ever entering it).
+                    this.setMove(e, mine.pos.x, mine.pos.y);
+                }
             }
             else if (!e.mining && !e.inMine && e.path.length === 0 && e.moveTarget == null) {
                 // T31 B3: an idle, unassigned miner WAITS near the base and auto-enters the next mine that is

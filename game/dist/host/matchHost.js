@@ -7,7 +7,7 @@
 import { NEUTRAL } from "../sim/world.js";
 import { AIController } from "../sim/ai.js";
 import { BUILDING_DEFS } from "../data.js";
-import { TICK_DT, mineEta } from "../constants.js";
+import { TICK_DT, mineEta, mineSlotCap } from "../constants.js";
 import { FL, } from "../net/protocol.js";
 const CMD_RATE_CAP = 40; // max accepted commands per player per tick (spec §20.5)
 export class MatchHost {
@@ -287,8 +287,11 @@ export class MatchHost {
             // this (only the `mine` branch runs), so it stays fog-safe.
             if (!e.constructing) {
                 const eta = mineEta(e.type, e.resAccum, e.minerSlots);
+                // T31: `free` means the mine still has a spare slot — no miner inside AND none walking to
+                // claim it — so the HUD's Miner panel can list only genuinely-assignable mines and a
+                // right-click won't send a miner to a mine that is taken (which would make it wander off).
                 if (eta)
-                    s.mn = { s: eta.seconds == null ? 0 : eta.seconds, p: eta.progress, res: eta.resource, idle: eta.idle };
+                    s.mn = { s: eta.seconds == null ? 0 : eta.seconds, p: eta.progress, res: eta.resource, idle: eta.idle, free: this.world.claimedMiners(e.id) < mineSlotCap(e.type) };
             }
             if (e.hero)
                 s.hero = { mana: e.hero.mana, maxMana: e.hero.maxMana, ab: e.hero.abilities.map((a) => ({ rank: a.rank, cd: Math.max(0, a.cdUntil - this.world.time) })) };

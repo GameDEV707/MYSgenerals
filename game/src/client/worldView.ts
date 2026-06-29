@@ -39,7 +39,7 @@ export class ViewEntity {
   speedLevel = 0;          // T26 (own producing buildings)
   researching: { id: string; progress: number; time: number } | null = null; // T26 (own research center)
   // T29: own resource-mine extraction ETA (own mines only; null otherwise). seconds = null when idle.
-  mineEta: { seconds: number | null; progress: number; resource: string; idle: boolean } | null = null;
+  mineEta: { seconds: number | null; progress: number; resource: string; idle: boolean; free: boolean } | null = null;
   // T30: building level (CC / defensive tower) and any in-progress timed level upgrade (own only).
   level = 1;
   upgrading: { to: number; progress: number; time: number } | null = null;
@@ -200,7 +200,7 @@ export class WorldView {
     ve.bays = es.bay ?? 1;
     ve.speedLevel = es.spd ?? 0;
     ve.researching = es.rs ? { id: es.rs.id, progress: es.rs.progress, time: es.rs.time } : null;
-    ve.mineEta = es.mn ? { seconds: es.mn.idle ? null : es.mn.s, progress: es.mn.p, resource: es.mn.res, idle: es.mn.idle } : null;
+    ve.mineEta = es.mn ? { seconds: es.mn.idle ? null : es.mn.s, progress: es.mn.p, resource: es.mn.res, idle: es.mn.idle, free: es.mn.free ?? true } : null;
     ve.level = es.lvl ?? 1;
     ve.upgrading = es.up ? { to: es.up.to, progress: es.up.progress, time: es.up.time } : null;
     if (es.hero) {

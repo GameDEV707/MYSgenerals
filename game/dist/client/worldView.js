@@ -28,6 +28,8 @@ export class ViewEntity {
         this.bays = 1; // T26 (own producing buildings)
         this.speedLevel = 0; // T26 (own producing buildings)
         this.researching = null; // T26 (own research center)
+        // T29: own resource-mine extraction ETA (own mines only; null otherwise). seconds = null when idle.
+        this.mineEta = null;
         this.hitFlash = 0;
         this.dead = false; // always false in the view (snapshots omit dead entities)
         this.id = id;
@@ -198,6 +200,7 @@ export class WorldView {
         ve.bays = es.bay ?? 1;
         ve.speedLevel = es.spd ?? 0;
         ve.researching = es.rs ? { id: es.rs.id, progress: es.rs.progress, time: es.rs.time } : null;
+        ve.mineEta = es.mn ? { seconds: es.mn.idle ? null : es.mn.s, progress: es.mn.p, resource: es.mn.res, idle: es.mn.idle } : null;
         if (es.hero) {
             ve.hero = { mana: es.hero.mana, maxMana: es.hero.maxMana, abilities: es.hero.ab.map((a) => ({ rank: a.rank, cdUntil: this.time + a.cd })) };
         }

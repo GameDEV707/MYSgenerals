@@ -58,7 +58,7 @@ Needs the TypeScript compiler (`npm install -g typescript`).
 | Control groups | `Ctrl`+`0–9` to set, `0–9` to recall |
 | Camera | Arrow keys / screen-edge / middle-mouse drag |
 | Zoom | Mouse wheel |
-| Build | Select a Miner → category tab → click a building → place |
+| Build | Select a Miner → category tab → click a building → place. While placing, the command/selection/hero panels **hide** so the map is unobstructed; a **Cancel build** button (or `Esc` / right-click) backs out |
 | Train | Select a production building → click a unit |
 | Production queue | Select a producer → the queue strip shows order + progress; click a slot to cancel |
 | Factory upgrades | Select a Barracks / War Factory → **Production Bay** (build 2–3 at once) / **Assembly Speed** (+25% / +50%) |
@@ -112,6 +112,21 @@ floating over the map — a clean, Generals/Dota-style readout.
 
 The **hero ability cluster** (level, HP/mana, abilities) appears **only when the hero is selected**, docked
 tidily in the command area so it never overlaps the command buttons.
+
+## Unobstructed placement, cancel-build & mine readouts
+
+When you pick a building to place, the **command, selection and hero panels hide** so the whole
+battlefield is visible while you choose where to drop it; they return the instant placement ends. A
+clear **Cancel build** button is shown during placement (alongside `Esc` and right-click) so touch and
+keyboard players can always back out. This applies per split-screen side independently.
+
+Selecting one of **your own resource mines** shows a **countdown to the next unit of metal** (a
+"next {resource} in {n}s" line plus a resource-coloured progress bar, and a thin progress ring over the
+mine on the map). An **idle Silver Mine** with no assigned miners shows an *"assign miners"* hint instead.
+Enemy mines stay fog-hidden.
+
+The **Silver, Iron and Gold mines** now carry a **distinct resource-coloured emblem** — silver, iron and
+gold — both **on the map** and on the **build-menu buttons**, so the three are instantly tellable apart.
 
 ## Power
 
@@ -204,5 +219,7 @@ NODE_OPTIONS="" node test/overlay.mjs      # T27: entityOverlayLayout() — non-
 NODE_OPTIONS="" node test/power.mjs        # T28: power gate (reject under-power build) + powerStatus thresholds
 NODE_OPTIONS="" node test/zoom.mjs         # T28: Player-1 keyboard zoom (Shift/Ctrl) within bounds
 NODE_OPTIONS="" node test/heropanel.mjs    # T28: hero ability panel visible only when hero selected
+NODE_OPTIONS="" node test/mineeta.mjs      # T29: mine extraction ETA helper (silver slots / iron / gold / oil; idle)
+NODE_OPTIONS="" node test/placement.mjs    # T29: placement-visibility predicate + Cancel-build clears r.placing
 ```
 

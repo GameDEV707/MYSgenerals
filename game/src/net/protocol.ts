@@ -42,6 +42,7 @@ export interface EntitySnap {
   bay?: number;                                            // T26: parallel build bays (producer)
   spd?: number;                                            // T26: assembly-speed level (producer)
   rs?: { id: string; progress: number; time: number };     // T26: active research (research center)
+  mn?: { s: number; p: number; res: string; idle: boolean }; // T29: own resource-mine extraction ETA (s = seconds to next +1; idle silver → s 0, idle true)
   hero?: { mana: number; maxMana: number; ab: { rank: number; cd: number }[] };
 }
 

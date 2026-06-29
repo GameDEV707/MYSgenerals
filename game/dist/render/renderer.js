@@ -2,7 +2,7 @@
 // Reads ONLY from the client WorldView (snapshot-reconstructed, fog-filtered). It never
 // touches the authoritative sim, so it cannot render entities the host didn't send.
 import { NEUTRAL } from "../client/worldView.js";
-import { BUILDING_DEFS } from "../data.js";
+import { BUILDING_DEFS, MINE_EMBLEM_COLORS } from "../data.js";
 const TERRAIN_COLORS = ["#3c5a3a", "#5a5048", "#26506b", "#6b6258"]; // grass, cliff, water, road
 const SHAPES = {
     miner: { type: "miner", chassis: "infantry", body: "roundsquare", arm: "none", glyph: "▲", combat: false, accent: false, skirt: false, recoil: false, dish: false, bodyScale: 1.0 },
@@ -315,11 +315,19 @@ export class Renderer {
         ctx.lineWidth = 2;
         this.roundRect(x, y, s, s, 4);
         ctx.stroke();
-        ctx.fillStyle = "#dfe7ee";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.font = `${Math.floor(s * 0.5)}px serif`;
-        ctx.fillText(def.icon, this.toX(e.pos.x), this.toY(e.pos.y));
+        // T29 Part C: each resource mine draws a distinct resource-coloured emblem (a faceted gem) so the
+        // Silver / Iron / Gold mines are unmistakable at a glance, keeping the team-colour outline above.
+        const mineColor = MINE_EMBLEM_COLORS[e.type];
+        if (mineColor && !e.constructing) {
+            this.drawMineEmblem(this.toX(e.pos.x), this.toY(e.pos.y), s * 0.4, mineColor);
+        }
+        else {
+            ctx.fillStyle = "#dfe7ee";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = `${Math.floor(s * 0.5)}px serif`;
+            ctx.fillText(def.icon, this.toX(e.pos.x), this.toY(e.pos.y));
+        }
         if (e.constructing) {
             ctx.strokeStyle = "rgba(255,200,120,0.6)";
             ctx.setLineDash([4, 3]);
@@ -352,6 +360,12 @@ export class Renderer {
         }
         else if (e.owner === this.world.me && e.researching) {
             this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.researching.progress), "#a78bfa");
+        }
+        // T29 Part B: a thin resource-coloured progress ring over the SELECTED own mine showing fill
+        // toward the next +1 (consistent with the overlay stack — drawn around the tile, above the bars).
+        if (e.owner === this.world.me && this.selection.has(e.id) && e.mineEta && !e.mineEta.idle) {
+            const mc = MINE_EMBLEM_COLORS[e.type] || "#c9d1d9";
+            this.drawMineRing(this.toX(e.pos.x), this.toY(e.pos.y), s * 0.62, e.mineEta.progress, mc);
         }
         this.drawHpBar(e, s);
         if (this.selection.has(e.id))
@@ -716,6 +730,48 @@ export class Renderer {
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(this.toX(e.pos.x), this.toY(e.pos.y), r, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    // T29 Part C: a faceted resource-coloured gem/ingot emblem centred on a mine tile. `half` is half
+    // the gem's width (px). A lighter top facet + dark outline read clearly at a distance.
+    drawMineEmblem(cx, cy, half, color) {
+        const ctx = this.ctx;
+        // diamond / gem silhouette
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - half);
+        ctx.lineTo(cx + half, cy);
+        ctx.lineTo(cx, cy + half);
+        ctx.lineTo(cx - half, cy);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = "#0b0f14";
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        // top highlight facet (lighter) for a gem-like sheen
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - half);
+        ctx.lineTo(cx + half * 0.55, cy - half * 0.15);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx - half * 0.55, cy - half * 0.15);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.fill();
+    }
+    // T29 Part B (optional cue): a thin progress ring around a selected own mine showing fill toward
+    // the next extraction. Sweeps clockwise from the top in the mine's resource colour.
+    drawMineRing(cx, cy, r, progress, color) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "rgba(0,0,0,0.45)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        const a = -Math.PI / 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, a, a + Math.max(0, Math.min(1, progress)) * Math.PI * 2);
         ctx.stroke();
     }
     roundRect(x, y, w, h, r) {

@@ -48,6 +48,23 @@ export function powerStatus(gen, use) {
         return "low";
     return "ok";
 }
+export function mineEta(type, resAccum, minerSlots) {
+    const accum = Math.max(0, Math.min(1, resAccum));
+    const remain = 1 - accum;
+    switch (type) {
+        case "silver_mine": {
+            const slots = Math.min(Math.max(0, minerSlots), SILVER_MINE_SLOTS);
+            if (slots <= 0)
+                return { seconds: null, progress: 0, resource: "silver", idle: true };
+            const ratePerSec = slots / MINER_OUTPUT_INTERVAL; // +1 every MINER_OUTPUT_INTERVAL per miner
+            return { seconds: remain / ratePerSec, progress: accum, resource: "silver", idle: false };
+        }
+        case "iron_mine": return { seconds: remain * IRON_INTERVAL, progress: accum, resource: "iron", idle: false };
+        case "gold_mine": return { seconds: remain * GOLD_INTERVAL, progress: accum, resource: "gold", idle: false };
+        case "oil_derrick": return { seconds: remain * OIL_INTERVAL, progress: accum, resource: "silver", idle: false };
+        default: return null;
+    }
+}
 // Hero (§9 / §26.1)
 export const HERO_MAX_LEVEL = 10;
 export const HERO_RESPAWN_BASE = 8; // 8 s + 4 s * level

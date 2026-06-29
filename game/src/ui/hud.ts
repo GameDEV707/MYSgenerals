@@ -5,7 +5,7 @@ import { WorldView, ViewEntity } from "../client/worldView.js";
 import { Renderer } from "../render/renderer.js";
 import { InputController } from "../input.js";
 import { AudioManager } from "../render/audio.js";
-import { BUILDING_DEFS, UNIT_DEFS, BUILD_MENU, RESEARCH_DEFS, RESEARCH_BY_ID } from "../data.js";
+import { BUILDING_DEFS, UNIT_DEFS, BUILD_MENU, RESEARCH_DEFS, RESEARCH_BY_ID, MINE_EMBLEM_COLORS, RESOURCE_COLORS } from "../data.js";
 import { BuildingId, UnitId, Cost } from "../types.js";
 import { MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, powerStatus } from "../constants.js";
 import { t, onLangChange } from "../i18n.js";
@@ -19,6 +19,14 @@ const ABILITY_ICONS = ["🔫", "🚩", "💨", "☄"];
 export function heroPanelShouldShow(heroId: number, selection: Set<number>, editing: boolean): boolean {
   if (editing) return true;
   return heroId !== 0 && selection.has(heroId);
+}
+
+// T29 Part A: while the player is positioning a building to place (`r.placing` set), the
+// map-covering HUD panels (command, selection, hero) are hidden so the battlefield is unobstructed,
+// and a Cancel-build control is shown. Pure predicate over the renderer's `placing` value so it is
+// headless-testable; true while placing, false otherwise.
+export function panelsHiddenDuringPlacement(placing: unknown): boolean {
+  return placing != null;
 }
 
 interface WidgetMeta { key: string; nameKey: string; resizable: boolean; hideable: boolean; }
@@ -83,6 +91,9 @@ export class HUD {
     hud.appendChild(this.el(`<div class="selinfo hud-widget" data-widget="selection" data-id="selinfo" style="display:none"></div>`));
     hud.appendChild(this.el(`<div class="herobar hud-widget" data-widget="hero" data-id="herobar"></div>`));
     hud.appendChild(this.el(`<div class="minimap-wrap hud-widget" data-widget="minimap" data-id="minimap-wrap"><canvas data-id="minimap" width="160" height="160"></canvas></div>`));
+    // T29 Part A: a discoverable Cancel-build control, shown only while positioning a building.
+    // Reachable by touch and mouse (a fixed floating button); the keyboard player also has Esc.
+    hud.appendChild(this.el(`<div class="cancelbuild" data-id="cancelbuild" style="display:none"><button class="btn danger" data-id="cancelbuild-btn">✕ ${t("cmd.cancelBuild")}</button></div>`));
     this.toastBox = this.el(`<div class="toasts" data-id="toasts"></div>`);
     hud.appendChild(this.toastBox);
     this.root.appendChild(hud);
@@ -90,6 +101,8 @@ export class HUD {
 
     (this.q("btn-edit") as HTMLElement).onclick = () => { if (this.editing) this.exitEdit(); else this.enterEdit(); };
     (this.q("btn-pause") as HTMLElement).onclick = () => this.togglePause();
+    // T29 Part A: Cancel-build aborts placement (mirrors Esc / right-click) and restores the panels.
+    (this.q("cancelbuild-btn") as HTMLElement).onclick = () => { this.input.setPlacing(null); this.audio.play("click"); };
     const panel = this.q("cmdpanel") as HTMLElement;
     panel.addEventListener("click", (e) => this.onPanelClick(e));
     // T26 Part E: let the keyboard player (p1-keyboard) drive this panel with digits 1..0 and
@@ -116,6 +129,7 @@ export class HUD {
 
   private refreshStatic(): void {
     const lp = this.q("lowpower"); if (lp) lp.textContent = t("hud.lowPower");
+    const cb = this.q("cancelbuild-btn"); if (cb) cb.textContent = `✕ ${t("cmd.cancelBuild")}`;
   }
 
   update(_dt: number): void {
@@ -140,9 +154,15 @@ export class HUD {
     const mins = Math.floor(this.world.time / 60), secs = Math.floor(this.world.time % 60);
     this.setText("timer", `${mins}:${secs.toString().padStart(2, "0")}`);
 
-    this.updatePanel();
-    this.updateSelInfo();
-    this.updateHeroBar();
+    // T29 Part A: hide the map-covering panels (command/selection/hero) while positioning a building
+    // so the battlefield is unobstructed; show the Cancel-build control. Per-HUD-instance (this reads
+    // THIS side's renderer), so a split-screen player entering placement never blanks the other side.
+    const placing = panelsHiddenDuringPlacement(this.r.placing);
+    this.applyPlacementVisibility(placing);
+
+    this.updatePanel(placing);
+    this.updateSelInfo(placing);
+    this.updateHeroBar(placing);
     this.r.drawMinimap((this.q("minimap") as HTMLCanvasElement).getContext("2d")!, 160);
 
     if (this.world.winner !== -2 && !this.ended) this.showEnd();
@@ -156,8 +176,17 @@ export class HUD {
     return out;
   }
 
-  private updatePanel(): void {
+  // T29 Part A: toggle the Cancel-build control while placing. The command/selection/hero panels are
+  // hidden inside their own update methods (which respect each widget's layout when not placing).
+  private applyPlacementVisibility(placing: boolean): void {
+    const cancel = this.q("cancelbuild");
+    if (cancel) cancel.style.display = placing ? "flex" : "none";
+  }
+
+  private updatePanel(placing = false): void {
     const me = this.world.me;
+    // T29 Part A: hide the command panel while positioning a building (restored when placement ends).
+    if (placing) { const panel0 = this.q("cmdpanel"); if (panel0) panel0.style.display = "none"; this.sig = ""; return; }
     const sel = this.selectedEntities();
     const own = sel.filter((e) => e.owner === me);
     const miner = own.find((e) => e.type === "miner");
@@ -171,6 +200,7 @@ export class HUD {
     if (prod) sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".");
     if (research) { const r = this.me().research; sig += "|R" + research.id + ":" + (research.researching ? "act" + research.researching.id : "idle") + ":" + r.weapons + r.armor + r.factoryTech + (r.logistics ? 1 : 0); }
     const panel = this.q("cmdpanel"); if (!panel) return;
+    panel.style.display = this.layout.commands?.hidden ? "none" : ""; // restore after placement ends
     if (sig !== this.sig) { this.sig = sig; panel.innerHTML = this.panelHtml(own, miner, prod, research); this.decorateNumberBadges(panel); }
     if (prod) this.updateProdLive(panel, prod);
     if (research && research.researching) this.updateResearchLive(panel, research);
@@ -342,8 +372,14 @@ export class HUD {
   }
   private buildBtn(b: BuildingId): string {
     const d = BUILDING_DEFS[b];
+    // T29 Part C: the Silver / Iron / Gold Mine buttons carry a resource-coloured emblem (a coloured
+    // gem) instead of the near-identical grey icon, so the build menu is instantly tellable apart.
+    const mineColor = MINE_EMBLEM_COLORS[b];
+    const icon = mineColor
+      ? `<span class="ic mine-emblem" style="color:${mineColor}">◆</span>`
+      : `<span class="ic">${d.icon}</span>`;
     return `<div class="cmd gridbtn" data-act="build" data-b="${b}" data-cost='${JSON.stringify(d.cost)}' title="${t(d.nameKey)}">
-      <span class="ic">${d.icon}</span><span>${t(d.nameKey)}</span><span class="cost">${this.costStr(d.cost)}</span></div>`;
+      ${icon}<span>${t(d.nameKey)}</span><span class="cost">${this.costStr(d.cost)}</span></div>`;
   }
   private unitBtn(u: UnitId): string {
     const d = UNIT_DEFS[u];
@@ -444,8 +480,9 @@ export class HUD {
     this.sig = "";
   }
 
-  private updateSelInfo(): void {
+  private updateSelInfo(placing = false): void {
     const box = this.q("selinfo"); if (!box) return;
+    if (placing) { box.style.display = "none"; return; } // T29 Part A: hidden while positioning a build
     if (this.layout.selection?.hidden) { box.style.display = "none"; return; }
     const sel = this.selectedEntities();
     if (sel.length === 0) { box.style.display = "none"; return; }
@@ -456,6 +493,9 @@ export class HUD {
     const chev = e.rank > 0 ? `<span class="chev">${"›".repeat(e.rank)}</span>` : "";
     let extra = "";
     if (e.hero) { const p = this.world.players[e.owner]; extra = `<div style="font-size:12px">Lvl ${p.heroLevel}</div><div class="bar mana"><div class="fill" style="width:${e.hero.mana / e.hero.maxMana * 100}%"></div></div>`; }
+    // T29 Part B: for the local player's own resource mines, show the extraction countdown to the
+    // next +1 (or an "assign miners" hint for an idle silver mine) plus which resource it yields.
+    if (e.owner === this.world.me && e.mineEta) extra += this.mineEtaHtml(e.mineEta);
     box.innerHTML = `<div class="name">${name} ${chev}</div>
       <div class="bar"><div class="fill" style="width:${Math.max(0, e.hp / e.maxHp * 100)}%"></div></div>
       <div style="font-size:12px;color:var(--text-dim)">HP ${Math.ceil(e.hp)}/${e.maxHp}</div>
@@ -463,12 +503,29 @@ export class HUD {
       ${sel.length > 1 ? `<div style="margin-top:4px;font-size:12px">${t("hud.unitsSelected", { count: sel.length })}</div>` : ""}`;
   }
 
-  private updateHeroBar(): void {
+  // T29 Part B: the mine extraction readout — a resource-coloured progress bar + a "next in {n}s"
+  // countdown (own mines only), or an idle hint with "assign miners" for a silver mine with no miners.
+  private mineEtaHtml(eta: NonNullable<ViewEntity["mineEta"]>): string {
+    const resName = t("hud." + eta.resource);
+    const col = RESOURCE_COLORS[eta.resource as "silver" | "iron" | "gold"] || "#c9d1d9";
+    if (eta.idle || eta.seconds == null) {
+      return `<div class="mine-eta idle">
+        <div class="mine-line"><span class="mine-dot" style="background:${col}"></span>${t("mine.idle")}</div>
+        <div class="mine-hint">${t("mine.assignMiners")}</div></div>`;
+    }
+    const n = Math.max(0, Math.ceil(eta.seconds));
+    const pct = Math.max(0, Math.min(100, eta.progress * 100));
+    return `<div class="mine-eta">
+      <div class="mine-line"><span class="mine-dot" style="background:${col}"></span>${t("mine.nextIn", { res: resName, n })}</div>
+      <div class="bar mine-bar"><div class="fill" style="width:${pct}%;background:${col}"></div></div></div>`;
+  }
+
+  private updateHeroBar(placing = false): void {
     const bar = this.q("herobar"); if (!bar) return;
     const p = this.me();
     // T28 Part A/D: only show the hero cluster when the hero is selected (or while editing layout),
-    // so it no longer floats over the command panel by default.
-    if (this.layout.hero?.hidden || !heroPanelShouldShow(p.heroId, this.r.selection, this.editing)) {
+    // so it no longer floats over the command panel by default. T29 Part A: also hidden while placing.
+    if (placing || this.layout.hero?.hidden || !heroPanelShouldShow(p.heroId, this.r.selection, this.editing)) {
       bar.style.display = "none"; return;
     }
     bar.style.display = "";

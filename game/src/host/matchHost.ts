@@ -8,7 +8,7 @@ import { World, Command, GameEvent, NEUTRAL, Entity } from "../sim/world.js";
 import { AIController } from "../sim/ai.js";
 import { BUILDING_DEFS } from "../data.js";
 import { BuildingId } from "../types.js";
-import { TICK_DT } from "../constants.js";
+import { TICK_DT, mineEta } from "../constants.js";
 import {
   Snapshot, EntitySnap, PlayerSnap, WireCommand, FL, BannerSnap, StrikeSnap,
 } from "../net/protocol.js";
@@ -233,6 +233,13 @@ export class MatchHost implements CommandSink {
       if (e.rally) s.ral = [e.rally.x, e.rally.y];
       if (e.isBuilding && BUILDING_DEFS[e.type as BuildingId]?.produces) { s.bay = e.bays; s.spd = e.speedLevel; }
       if (e.researching) s.rs = { id: e.researching.id, progress: e.researching.progress, time: e.researching.time };
+      // T29: expose the extraction ETA for the owner's own resource mines (snapshot-only readout —
+      // computed exactly like economySystem(); idle silver mine reports idle). Enemy mines never get
+      // this (only the `mine` branch runs), so it stays fog-safe.
+      if (!e.constructing) {
+        const eta = mineEta(e.type, e.resAccum, e.minerSlots);
+        if (eta) s.mn = { s: eta.seconds == null ? 0 : eta.seconds, p: eta.progress, res: eta.resource, idle: eta.idle };
+      }
       if (e.hero) s.hero = { mana: e.hero.mana, maxMana: e.hero.maxMana, ab: e.hero.abilities.map((a) => ({ rank: a.rank, cd: Math.max(0, a.cdUntil - this.world.time) })) };
     }
     return s;

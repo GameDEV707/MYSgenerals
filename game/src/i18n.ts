@@ -170,6 +170,12 @@ const en: Dict = {
   "cmd.sell": "Sell",
   "cmd.capture": "Capture",
   "cmd.rally": "Rally Point",
+  "cmd.cancelBuild": "Cancel build",
+
+  "mine.nextIn": "Next {res} in {n}s",
+  "mine.idle": "Idle — no miners",
+  "mine.assignMiners": "Assign miners to start mining",
+  "mine.yields": "Yields {res}",
 
   "units.miner.name": "Miner",
   "units.engineer.name": "Engineer",
@@ -435,6 +441,12 @@ const ru: Dict = {
   "cmd.sell": "Продать",
   "cmd.capture": "Захват",
   "cmd.rally": "Точка сбора",
+  "cmd.cancelBuild": "Отменить постройку",
+
+  "mine.nextIn": "Следующий {res} через {n} с",
+  "mine.idle": "Простаивает — нет шахтёров",
+  "mine.assignMiners": "Назначьте шахтёров, чтобы начать добычу",
+  "mine.yields": "Добывает: {res}",
 
   "units.miner.name": "Шахтёр",
   "units.engineer.name": "Инженер",
@@ -700,6 +712,12 @@ const uz: Dict = {
   "cmd.sell": "Sotish",
   "cmd.capture": "Egallash",
   "cmd.rally": "Yigʻilish nuqtasi",
+  "cmd.cancelBuild": "Qurishni bekor qilish",
+
+  "mine.nextIn": "Keyingi {res} {n} s ichida",
+  "mine.idle": "Boʻsh — konchilar yoʻq",
+  "mine.assignMiners": "Qazib olishni boshlash uchun konchilar tayinlang",
+  "mine.yields": "Qazib oladi: {res}",
 
   "units.miner.name": "Konchi",
   "units.engineer.name": "Muhandis",

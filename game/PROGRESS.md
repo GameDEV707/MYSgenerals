@@ -1006,3 +1006,110 @@ existing ability click/cooldown wiring intact while satisfying the "tidy, in the
 overlap, all players" requirement. A separate global-powers/super-weapon countdown strip remains [OPT]
 (the only persistent super is the hero ultimate, whose cooldown lives in the hero cluster). No required
 T28 scope item is dropped.
+
+
+
+---
+
+## T29 — Unobstructed placement, cancel-build, mine extraction countdown & resource mine emblems  *(build-flow & economy readability)*
+
+> Source of truth: `../MYSgenerals.md` §24 → T29. **UI/UX + a read-only economy readout.** Exposing
+> the mine countdown is a snapshot-only addition (the host computes the ETA for the owner's own mines,
+> like the existing per-building queue data); the authoritative simulation (§3.2), the `Command` union,
+> the netcode and the T23/T24 split-screen routing / per-side customizable HUD are **unchanged**.
+
+**Goal (restated):** three readability fixes reported in play — (1) when the player picks a building
+and is choosing **where to put it**, the **HUD panels that cover the map hide** (keeping only the top
+resource bar) so placement is unobstructed, with a clear **Cancel-build** control to back out (today
+only `Esc` / right-click, which a touch or keyboard player can't discover); (2) selecting one of the
+player's **resource mines** shows **how long until the next unit of metal** is extracted (a countdown /
+progress to the next `+1`); (3) each mine gets a **distinct resource-coloured emblem** — silver on the
+Silver Mine, iron on the Iron Mine, gold on the Gold Mine — both **on the map** and on the **build-menu
+button**, so the three are instantly tellable apart.
+
+**Defects fixed (with file references):**
+- **Build panels covered the map.** `ui/hud.ts` kept `cmdpanel`, `selinfo` and `herobar` visible at all
+  times; while `render/renderer.ts drawPlacement()` showed the placement ghost, those panels occupied
+  the lower third of the screen, hiding where the building would drop.
+- **Cancelling placement was hidden.** Placement was only cancellable via `Esc` / right-click
+  (`input.ts onKey` / `onRightClick`) — no on-screen control, so touch (T23) / keyboard (T24) players
+  had no discoverable way to abort a started build.
+- **No income cadence feedback.** `sim/world.ts economySystem()` accumulates `resAccum` per mine and
+  emits `+1` every `MINER_OUTPUT_INTERVAL` (silver, scaled by `minerSlots`), `IRON_INTERVAL`,
+  `GOLD_INTERVAL` or `OIL_INTERVAL`; selecting a mine showed only its HP — no time-to-next-extraction.
+- **Mines looked alike.** `render/renderer.ts drawBuilding()` drew each building's generic `def.icon`,
+  so the Silver / Iron / Gold mines read as similar grey tiles (and similar grey build buttons).
+
+### Scope checklist (T29)
+- [x] Entering build-placement **hides** the map-covering HUD panels (command, selection, hero) and
+      **restores** them when placement ends (placed / cancelled / `Esc`); works for mouse, touch and
+      keyboard, and applies **per split-screen side** (each reads its own renderer's `placing`).
+- [x] A discoverable **Cancel-build** control (`cmd.cancelBuild`) aborts placement via
+      `input.setPlacing(null)` — reachable by touch and mouse — alongside `Esc` / right-click (the
+      keyboard player's existing cancel); the panels reappear afterward.
+- [x] Selecting an **own resource mine** shows the **time until the next metal** is extracted
+      ("next {res} in {n}s" + a resource-coloured progress bar, and an on-map progress ring), and an
+      **idle silver mine** (no miners) shows an *"assign miners"* hint; enemy mines stay fog-filtered.
+- [x] The **Silver / Iron / Gold mines** show **distinct resource-coloured emblems** on the **map**
+      (`drawBuilding()` gem) and in the **build menu** (`buildBtn()` coloured ◆), in the silver / iron /
+      gold palette.
+- [x] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography U+02BB/U+02BC);
+      `localeParity()` passes.
+- [x] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen
+      (T24) and LAN (T25) regress cleanly.
+
+### Implementation summary
+- **`src/constants.ts`:** pure, exported **`mineEta(type, resAccum, minerSlots)`** → `{ seconds, progress,
+  resource, idle }` (or `null` for a non-mine). It mirrors `economySystem()` exactly: silver fills at
+  `slots / MINER_OUTPUT_INTERVAL` per second (slots capped at `SILVER_MINE_SLOTS`; **idle** with no
+  miners → `seconds: null`); iron / gold / captured oil fill on `IRON_INTERVAL` / `GOLD_INTERVAL` /
+  `OIL_INTERVAL`. Shared by the host snapshot and the test.
+- **`src/data.ts`:** exported **`RESOURCE_COLORS`** (silver `#c9d1d9`, iron `#8c98a4`, gold `#ffd23f`) +
+  **`MINE_EMBLEM_COLORS`** mapping the three mine `BuildingId`s to those colours — one palette source
+  used by both the renderer and the build menu.
+- **`src/net/protocol.ts` + `src/host/matchHost.ts`:** added the own-entity-only `mn` field to
+  `EntitySnap`; `snapEntity()` (the `mine` branch) attaches `mineEta()` for non-constructing mines, so
+  the readout reaches only the owner (fog-safe, like the existing queue/research data).
+- **`src/client/worldView.ts`:** `ViewEntity.mineEta` reconstructed from `es.mn` (idle → `seconds:null`).
+- **`src/ui/hud.ts`:** exported pure **`panelsHiddenDuringPlacement(placing)`** (true while `placing`
+  set). `update()` computes it from **this HUD's** `this.r.placing` and calls `applyPlacementVisibility()`
+  (toggles the Cancel button) and passes the flag into `updatePanel` / `updateSelInfo` / `updateHeroBar`,
+  which hide their widget while placing and restore it (respecting each widget's layout) when it ends.
+  A `cancelbuild` button wired to `input.setPlacing(null)`. `updateSelInfo()` renders the new
+  `mineEtaHtml()` for an own mine (countdown bar or idle/assign-miners hint). `buildBtn()` draws the
+  resource-coloured ◆ emblem for the three mines.
+- **`src/render/renderer.ts`:** `drawBuilding()` draws a faceted resource-coloured gem
+  (`drawMineEmblem()`) for each mine instead of the grey emoji (team outline kept), and a thin
+  progress ring (`drawMineRing()`) over a **selected own** mine showing fill toward the next unit.
+- **`styles.css`:** `.cancelbuild` (centred per HUD half, shown only while placing), `.mine-eta` /
+  `.mine-bar` / `.mine-dot` / `.mine-hint`, and `.ic.mine-emblem`.
+- **`src/i18n.ts`:** `cmd.cancelBuild`, `mine.nextIn` (`{res}` / `{n}`), `mine.idle`,
+  `mine.assignMiners`, `mine.yields` in en/ru/uz (Uzbek with U+02BB `ʻ`).
+
+### How each DoD line was verified
+**Quality gate.** `bash build.sh` compiles client + server with **zero TS errors**. **Twenty-two**
+suites pass: the prior twenty plus the two new T29 suites — `mineeta` and `placement`.
+
+- **Mine-ETA helper.** `test/mineeta.mjs` proves `mineEta()` returns **idle** (`seconds:null`,
+  `progress:0`) for a silver mine with **0 miners**; scales the silver countdown with miner count
+  (1→10s, 2→5s, 3→10/3 s) and **caps** at the work-slot count (extra miners don't help); returns the
+  fixed `15s` / `30s` / `5s` from empty for iron / gold / captured oil with the correct `resource`;
+  **counts down** as `resAccum` rises (0.0 > 0.5 > 0.9, ≈0 at full) across all four mine types; clamps
+  out-of-range `resAccum`; and returns `null` for non-mine buildings.
+- **Placement-visibility predicate + cancel-clears-placing.** `test/placement.mjs` asserts
+  `panelsHiddenDuringPlacement()` is `false` for `null`/`undefined` and `true` while a building is
+  being placed, then drives a real `InputController`: `setPlacing('barracks')` sets `r.placing` (panels
+  hide), the **Cancel action** `setPlacing(null)` clears it (panels return), and starting placement
+  also cancels a pending ability.
+- **Trilingual + parity.** `localeParity()` (in `test/smoke.mjs`) passes with the five new keys present
+  in uz/ru/en (Uzbek apostrophes U+02BB).
+- **Split-safe / fog-safe.** Hide/show reads **this HUD instance's** renderer `placing`, so one
+  split-screen player entering placement never blanks the other's panels; the mine ETA is attached only
+  in the owner's `snapEntity` branch, so enemy mines never leak a countdown.
+- **No regression.** The sim/netcode/split-screen routing are untouched (only an additive snapshot
+  field + UI); `smoke, net, host, lobby, input, hudlayout, stress, split, keybindings, kbinput, lan,
+  production, research, visuals, keyboard, catnav, overlay, power, zoom, heropanel` all stay green.
+
+**[OPT] deferred:** none. The optional on-map progress cue (B3) is implemented as a thin
+resource-coloured ring over the selected own mine (drawn around the tile, clear of the T27 overlay
+bar stack). No required T29 scope item is dropped.

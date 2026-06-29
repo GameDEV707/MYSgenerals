@@ -1,5 +1,5 @@
 // MYS Generals — canonical constants (spec §0 / §26.1). These are the FIXED economy numbers.
-import { Cost } from "./types.js";
+import { Cost, ResKind } from "./types.js";
 
 export const TILE = 24; // pixels per tile
 export const TICK_HZ = 20; // simulation ticks per second (§3.2)
@@ -57,6 +57,35 @@ export function powerStatus(gen: number, use: number): PowerStatus {
   if (use > gen) return "deficit";
   if (gen > 0 ? use >= LOW_POWER_RATIO * gen : use > 0) return "low";
   return "ok";
+}
+
+// ---- T29: resource-mine extraction ETA (pure; shared by the host snapshot + the headless test) ----
+// The economy emits +1 of a mine's resource whenever its `resAccum` (0..1 fill toward the next unit)
+// reaches 1. This mirrors `World.economySystem()`:
+//   • silver_mine — fills at `slots / MINER_OUTPUT_INTERVAL` per second (slots capped at the work-slot
+//     count); a mine with **no** active miners is idle and reports `seconds: null`.
+//   • iron_mine   — fills at `1 / IRON_INTERVAL` per second.
+//   • gold_mine   — fills at `1 / GOLD_INTERVAL` per second.
+//   • oil_derrick — captured derrick: yields silver at `1 / OIL_INTERVAL` per second.
+// `seconds` is the time until the next +1 (null when idle), `progress` the 0..1 fill toward it, and
+// `resource` which resource is produced. Returns null for any non-mine type.
+export type MineType = "silver_mine" | "iron_mine" | "gold_mine" | "oil_derrick";
+export interface MineEta { seconds: number | null; progress: number; resource: ResKind; idle: boolean; }
+export function mineEta(type: string, resAccum: number, minerSlots: number): MineEta | null {
+  const accum = Math.max(0, Math.min(1, resAccum));
+  const remain = 1 - accum;
+  switch (type) {
+    case "silver_mine": {
+      const slots = Math.min(Math.max(0, minerSlots), SILVER_MINE_SLOTS);
+      if (slots <= 0) return { seconds: null, progress: 0, resource: "silver", idle: true };
+      const ratePerSec = slots / MINER_OUTPUT_INTERVAL; // +1 every MINER_OUTPUT_INTERVAL per miner
+      return { seconds: remain / ratePerSec, progress: accum, resource: "silver", idle: false };
+    }
+    case "iron_mine": return { seconds: remain * IRON_INTERVAL, progress: accum, resource: "iron", idle: false };
+    case "gold_mine": return { seconds: remain * GOLD_INTERVAL, progress: accum, resource: "gold", idle: false };
+    case "oil_derrick": return { seconds: remain * OIL_INTERVAL, progress: accum, resource: "silver", idle: false };
+    default: return null;
+  }
 }
 
 // Hero (§9 / §26.1)

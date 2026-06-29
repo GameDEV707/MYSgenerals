@@ -144,6 +144,25 @@ select, input {
 .lowpower-banner.critical { background: rgba(239,68,68,0.92); color: #fff; animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
+/* T29 Part A: Cancel-build control — a fixed, discoverable button shown only while positioning a
+   building (the map-covering command/selection/hero panels are hidden during placement). Centred
+   within each HUD half so split-screen sides stay independent. */
+.cancelbuild {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; align-items: center; z-index: 40; pointer-events: auto;
+}
+.cancelbuild .btn { font-size: 14px; padding: 9px 18px; font-weight: 700; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+
+/* T29 Part B: mine extraction readout in the selection panel (countdown / progress / idle hint). */
+.mine-eta { margin-top: 6px; }
+.mine-eta .mine-line { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.mine-eta .mine-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.mine-eta .mine-hint { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.mine-eta .bar.mine-bar { height: 8px; background: #1a2430; border-radius: 4px; overflow: hidden; margin: 4px 0 0; border: 1px solid var(--border); }
+.mine-eta .bar.mine-bar .fill { height: 100%; transition: width .15s; }
+/* T29 Part C: resource-coloured gem emblem on the Silver / Iron / Gold Mine build buttons. */
+.cmd .ic.mine-emblem { text-shadow: 0 0 2px #000, 0 0 1px #000; }
+
 .minimap-wrap {
   position: absolute; right: 10px; bottom: 10px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px;

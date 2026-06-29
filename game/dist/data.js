@@ -10,6 +10,19 @@ const M = {
 export function damageMultiplier(dmg, armor) {
     return M[dmg][armor];
 }
+// ---- T29: resource palette + per-mine emblem colours (shared by the renderer + the build menu) ----
+// Matches the colours already used for the floating "+1" text and the top resource bar (spec §24 →
+// T29 C3): silver #c9d1d9, iron #8c98a4, gold #ffd23f.
+export const RESOURCE_COLORS = {
+    silver: "#c9d1d9", iron: "#8c98a4", gold: "#ffd23f",
+};
+// The three resource mines get a distinct resource-coloured emblem on the map and the build button so
+// they are instantly tellable apart (they were near-identical grey icons before).
+export const MINE_EMBLEM_COLORS = {
+    silver_mine: RESOURCE_COLORS.silver,
+    iron_mine: RESOURCE_COLORS.iron,
+    gold_mine: RESOURCE_COLORS.gold,
+};
 export const UNIT_DEFS = {
     miner: {
         id: "miner", nameKey: "units.miner.name", hp: 90, armor: "InfantryLight", speed: 2.6,

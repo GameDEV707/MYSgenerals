@@ -84,10 +84,10 @@ export function defenseUpgradeCost(base) {
 // The canonical T30 rule: a level upgrade takes HALF the time a comparable build would.
 export function upgradeTime(buildTime) { return Math.max(1, Math.ceil(buildTime / 2)); }
 // ---- T30: worked-mine economy (spec §24 → T30 Part C) ----
-// Work slots per mine type: silver scales with miners up to its canonical cap; iron/gold/oil need
-// exactly one miner working inside. A mine with zero occupancy produces nothing.
-export function mineSlotCap(type) {
-    return type === "silver_mine" ? SILVER_MINE_SLOTS : 1;
+// Work slots per mine type. T31: EXACTLY ONE miner works a mine — every type holds a single miner
+// (this supersedes T30's silver "scales with up to 3 miners" rule).
+export function mineSlotCap(_type) {
+    return 1;
 }
 export function isMineType(type) {
     return type === "silver_mine" || type === "iron_mine" || type === "gold_mine" || type === "oil_derrick";
@@ -97,13 +97,10 @@ export function mineEta(type, resAccum, minerSlots) {
     const remain = 1 - accum;
     const occupied = Math.max(0, minerSlots) > 0;
     switch (type) {
-        case "silver_mine": {
-            const slots = Math.min(Math.max(0, minerSlots), SILVER_MINE_SLOTS);
-            if (slots <= 0)
+        case "silver_mine":
+            if (!occupied)
                 return { seconds: null, progress: 0, resource: "silver", idle: true };
-            const ratePerSec = slots / MINER_OUTPUT_INTERVAL; // +1 every MINER_OUTPUT_INTERVAL per miner
-            return { seconds: remain / ratePerSec, progress: accum, resource: "silver", idle: false };
-        }
+            return { seconds: remain * MINER_OUTPUT_INTERVAL, progress: accum, resource: "silver", idle: false };
         case "iron_mine":
             if (!occupied)
                 return { seconds: null, progress: 0, resource: "iron", idle: true };

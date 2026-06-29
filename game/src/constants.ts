@@ -94,10 +94,10 @@ export function defenseUpgradeCost(base: Cost): Cost {
 export function upgradeTime(buildTime: number): number { return Math.max(1, Math.ceil(buildTime / 2)); }
 
 // ---- T30: worked-mine economy (spec §24 → T30 Part C) ----
-// Work slots per mine type: silver scales with miners up to its canonical cap; iron/gold/oil need
-// exactly one miner working inside. A mine with zero occupancy produces nothing.
-export function mineSlotCap(type: string): number {
-  return type === "silver_mine" ? SILVER_MINE_SLOTS : 1;
+// Work slots per mine type. T31: EXACTLY ONE miner works a mine — every type holds a single miner
+// (this supersedes T30's silver "scales with up to 3 miners" rule).
+export function mineSlotCap(_type: string): number {
+  return 1;
 }
 export function isMineType(type: string): boolean {
   return type === "silver_mine" || type === "iron_mine" || type === "gold_mine" || type === "oil_derrick";
@@ -113,8 +113,8 @@ export function isMineType(type: string): boolean {
 //   • oil_derrick — captured derrick: yields silver at `1 / OIL_INTERVAL` per second.
 // `seconds` is the time until the next +1 (null when idle), `progress` the 0..1 fill toward it, and
 // `resource` which resource is produced. Returns null for any non-mine type.
-// T30 update: EVERY mine now needs a miner working inside it — iron/gold/oil also report idle (no
-// countdown) when their occupancy (`minerSlots`) is zero, mirroring the worked-mine economy.
+// T30/T31 update: EVERY mine needs a miner working inside it, and (T31) exactly ONE miner works a
+// mine — so a silver mine yields its single-miner rate (no scaling). With zero occupancy a mine is idle.
 export type MineType = "silver_mine" | "iron_mine" | "gold_mine" | "oil_derrick";
 export interface MineEta { seconds: number | null; progress: number; resource: ResKind; idle: boolean; }
 export function mineEta(type: string, resAccum: number, minerSlots: number): MineEta | null {
@@ -122,12 +122,9 @@ export function mineEta(type: string, resAccum: number, minerSlots: number): Min
   const remain = 1 - accum;
   const occupied = Math.max(0, minerSlots) > 0;
   switch (type) {
-    case "silver_mine": {
-      const slots = Math.min(Math.max(0, minerSlots), SILVER_MINE_SLOTS);
-      if (slots <= 0) return { seconds: null, progress: 0, resource: "silver", idle: true };
-      const ratePerSec = slots / MINER_OUTPUT_INTERVAL; // +1 every MINER_OUTPUT_INTERVAL per miner
-      return { seconds: remain / ratePerSec, progress: accum, resource: "silver", idle: false };
-    }
+    case "silver_mine":
+      if (!occupied) return { seconds: null, progress: 0, resource: "silver", idle: true };
+      return { seconds: remain * MINER_OUTPUT_INTERVAL, progress: accum, resource: "silver", idle: false };
     case "iron_mine":
       if (!occupied) return { seconds: null, progress: 0, resource: "iron", idle: true };
       return { seconds: remain * IRON_INTERVAL, progress: accum, resource: "iron", idle: false };

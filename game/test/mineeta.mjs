@@ -9,7 +9,7 @@ let failures = 0;
 function assert(c, m) { if (!c) { console.error("  ✗ " + m); failures++; } else console.log("  ✓ " + m); }
 function near(a, b, eps = 1e-6) { return Math.abs(a - b) <= eps; }
 
-console.log("A silver mine with NO miners is idle (no countdown, prompts to assign miners):");
+console.log("A silver mine with NO miner is idle (no countdown, prompts to assign a miner):");
 {
   const e = mineEta("silver_mine", 0, 0);
   assert(e !== null, "returns a readout for a silver mine");
@@ -19,15 +19,13 @@ console.log("A silver mine with NO miners is idle (no countdown, prompts to assi
   assert(e.resource === "silver", "yields silver");
 }
 
-console.log("A silver mine's countdown scales with the number of working miners (capped at the slots):");
+console.log("T31: ONE miner works a silver mine → its single-miner rate (no multi-miner scaling):");
 {
-  // rate = slots / MINER_OUTPUT_INTERVAL per second; from empty, seconds-to-next = MINER_OUTPUT_INTERVAL / slots.
-  assert(near(mineEta("silver_mine", 0, 1).seconds, MINER_OUTPUT_INTERVAL / 1), "1 miner → 10s to next");
-  assert(near(mineEta("silver_mine", 0, 2).seconds, MINER_OUTPUT_INTERVAL / 2), "2 miners → 5s to next");
-  assert(near(mineEta("silver_mine", 0, 3).seconds, MINER_OUTPUT_INTERVAL / 3), "3 miners → 10/3 s to next");
-  // extra miners beyond the work-slot cap do not speed it up further
-  assert(near(mineEta("silver_mine", 0, 5).seconds, mineEta("silver_mine", 0, SILVER_MINE_SLOTS).seconds), "miners beyond the cap don't help");
-  assert(mineEta("silver_mine", 0, 5).idle === false, "a capped/over-full silver mine is not idle");
+  // from empty, a worked silver mine takes MINER_OUTPUT_INTERVAL to the next +1, regardless of count.
+  assert(near(mineEta("silver_mine", 0, 1).seconds, MINER_OUTPUT_INTERVAL), "1 miner → 10s to next");
+  assert(mineEta("silver_mine", 0, 1).idle === false, "a worked silver mine is not idle");
+  // even if more miners are (defensively) reported, the rate does not scale up
+  assert(near(mineEta("silver_mine", 0, 3).seconds, MINER_OUTPUT_INTERVAL), "rate does not scale with extra miners (one-per-mine)");
 }
 
 console.log("Iron and gold mines (T30: need a miner inside) count down on their fixed intervals when occupied:");

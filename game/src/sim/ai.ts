@@ -47,19 +47,25 @@ export class AIController {
   private cc(): Entity | undefined { return this.world.entities.find((e) => e.owner === this.owner && e.type === "command_center" && !e.dead); }
 
   private manageEconomy(p: World["players"][number]): void {
-    // keep mines staffed: train miners up to the number of work slots we have (T30: every mine needs
-    // a miner inside). Silver mines hold 3 each; iron/gold/oil hold 1.
-    const miners = this.ownedAny("miner").length;
-    const slots = this.owned("silver_mine").length * 3
-      + this.owned("iron_mine").length + this.owned("gold_mine").length
-      + this.ownedAny("oil_derrick").filter((e) => e.owner === this.owner).length;
     const cc = this.cc();
-    if (cc && miners < Math.max(5, slots) && cc.queue.length === 0 && p.silver >= 5) {
+    // T31: keep a builder. Train one Engineer when we have none idle/spare (it constructs + captures).
+    const engineers = this.ownedAny("engineer");
+    const idleEngineer = engineers.some((e) => !e.buildTask && !e.captureTask);
+    if (cc && engineers.length === 0 && cc.queue.length === 0 && p.silver >= 20) {
+      this.world.issue({ t: "train", building: cc.id, unit: "engineer" });
+    } else if (cc && engineers.length < 2 && !idleEngineer && cc.queue.length === 0 && p.silver >= 40) {
+      this.world.issue({ t: "train", building: cc.id, unit: "engineer" }); // a second builder when the first is busy
+    }
+    // T31: keep mines staffed — ONE miner per mine (every type holds a single miner).
+    const miners = this.ownedAny("miner").length;
+    const slots = this.owned("silver_mine").length + this.owned("iron_mine").length
+      + this.owned("gold_mine").length + this.ownedAny("oil_derrick").filter((e) => e.owner === this.owner).length;
+    if (cc && miners < slots + 1 && cc.queue.length === 0 && p.silver >= 5) {
       this.world.issue({ t: "train", building: cc.id, unit: "miner" });
     }
-    // assign idle miners
+    // assign idle miners to a free mine (one per mine; they wait if none is available)
     for (const m of this.ownedAny("miner")) {
-      if (!m.mining && m.mineId == null && !m.buildTask && m.path.length === 0) {
+      if (!m.mining && m.mineId == null && m.path.length === 0) {
         this.world.autoAssignMiner(m);
       }
     }

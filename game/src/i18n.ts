@@ -174,7 +174,7 @@ const en: Dict = {
 
   "mine.nextIn": "Next {res} in {n}s",
   "mine.idle": "Idle — no miners",
-  "mine.assignMiners": "Assign miners to start mining",
+  "mine.assignMiners": "Assign a miner to start mining",
   "mine.yields": "Yields {res}",
 
   "units.miner.name": "Miner",
@@ -452,7 +452,7 @@ const ru: Dict = {
 
   "mine.nextIn": "Следующий {res} через {n} с",
   "mine.idle": "Простаивает — нет шахтёров",
-  "mine.assignMiners": "Назначьте шахтёров, чтобы начать добычу",
+  "mine.assignMiners": "Назначьте шахтёра, чтобы начать добычу",
   "mine.yields": "Добывает: {res}",
 
   "units.miner.name": "Шахтёр",
@@ -730,7 +730,7 @@ const uz: Dict = {
 
   "mine.nextIn": "Keyingi {res} {n} s ichida",
   "mine.idle": "Boʻsh — konchilar yoʻq",
-  "mine.assignMiners": "Qazib olishni boshlash uchun konchilar tayinlang",
+  "mine.assignMiners": "Qazib olishni boshlash uchun konchi tayinlang",
   "mine.yields": "Qazib oladi: {res}",
 
   "units.miner.name": "Konchi",

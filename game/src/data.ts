@@ -37,7 +37,7 @@ export const UNIT_DEFS: Record<UnitId, UnitDef> = {
   },
   engineer: {
     id: "engineer", nameKey: "units.engineer.name", hp: 80, armor: "InfantryLight", speed: 2.4,
-    vision: 5, cost: { gold: 1, silver: 20 }, buildTime: 18, builtAt: ["barracks"],
+    vision: 5, cost: { silver: 20 }, buildTime: 18, builtAt: ["command_center", "barracks"],
     isWorker: true, radius: 0.35, icon: "🔧",
   },
   infantry: {
@@ -90,7 +90,7 @@ export const UNIT_DEFS: Record<UnitId, UnitDef> = {
 export const BUILDING_DEFS: Record<BuildingId, BuildingDef> = {
   command_center: {
     id: "command_center", nameKey: "buildings.commandCenter.name", hp: 3000, power: 5,
-    cost: { silver: 0 }, buildTime: 0, footprint: 4, produces: ["miner"], vision: 9,
+    cost: { silver: 0 }, buildTime: 0, footprint: 4, produces: ["miner", "engineer"], vision: 9,
     icon: "🏛", category: "economy",
   },
   silver_mine: {

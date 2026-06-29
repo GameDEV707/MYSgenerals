@@ -58,7 +58,7 @@ Needs the TypeScript compiler (`npm install -g typescript`).
 | Control groups | `Ctrl`+`0–9` to set, `0–9` to recall |
 | Camera | Arrow keys / screen-edge / middle-mouse drag |
 | Zoom | Mouse wheel |
-| Build | Select a Miner → category tab → click a building → place. While placing, the command/selection/hero panels **hide** so the map is unobstructed; a **Cancel build** button (or `Esc` / right-click) backs out |
+| Build | Select an **Engineer** → category tab → click a building → place. While placing, the command/selection/hero panels **hide** so the map is unobstructed; a **Cancel build** button (or `Esc` / right-click) backs out |
 | Train | Select a production building → click a unit |
 | Production queue | Select a producer → the queue strip shows order + progress; click a slot to cancel |
 | Factory upgrades | Select a Barracks / War Factory → **Production Bay** (build 2–3 at once) / **Assembly Speed** (+25% / +50%) |
@@ -151,9 +151,15 @@ tower's build time, and a level pip (L2/L3) marks upgraded buildings on the map.
 
 **Every mine needs a miner working inside it.** A mine with no miner sits **idle** and produces nothing.
 Train a **Miner** at the Command Center (5 silver); it **automatically walks to a free mine, goes inside,
-and works** — disappearing from the map (it no longer loiters beside the mine). Silver mines hold up to 3
-miners (faster output); iron / gold / captured-oil mines need one. If a mine is destroyed, its miners are
-**released** back onto the map and re-assigned to the next free mine.
+and works** — disappearing from the map (it no longer loiters beside the mine). **One miner works each
+mine**; if every mine is already staffed (or none is built yet) a new Miner **waits** near the base and
+**automatically enters** the next mine the moment one is built or freed. If a mine is destroyed, its
+miner is **released** back onto the map and re-assigned.
+
+**Builders and miners are separate jobs.** The **Engineer** is the builder: **select it, pick what to
+build, and it constructs** it (it also captures oil derricks). You **start with one Engineer** so you
+can build immediately, and you can train more at the Command Center — a **Miner for 5 silver** (digs)
+or an **Engineer for 20 silver** (builds). Miners never build; Engineers never mine.
 
 ## Power
 
@@ -251,5 +257,6 @@ NODE_OPTIONS="" node test/placement.mjs    # T29: placement-visibility predicate
 NODE_OPTIONS="" node test/basetech.mjs     # T30: Command-Center level gates the build tree (Barracks L2, War Factory L3)
 NODE_OPTIONS="" node test/upgrades.mjs     # T30: CC + defensive-tower level upgrades (half build time, +range/+damage, capped)
 NODE_OPTIONS="" node test/minework.mjs     # T30: worked-mine economy — unmanned = idle; miner enters/hides; release on death
+NODE_OPTIONS="" node test/workers.mjs      # T31: split worker roles — Engineer builds, Miner mines (one per mine), idle miners wait
 ```
 

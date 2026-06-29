@@ -1224,3 +1224,85 @@ pip), and the defensive range display is the literal attack + vision rings. No r
 item is dropped. (Captured **oil derricks** also obey the "needs a miner" rule via the generic mine
 helpers, though auto-assign prefers nearer base mines, so staffing a derrick is usually a manual
 choice.)
+
+
+
+---
+
+## T31 — Split worker roles: a dedicated Engineer (builder) and a mining-only Miner, one miner per mine  *(worker model overhaul)*
+
+> Source of truth: `../MYSgenerals.md` §24 → T31. **Extends the authoritative simulation** (§3.2) by
+> reassigning which unit type builds vs. mines and changing mine occupancy — but introduces **no new
+> netcode**: building still flows through the existing `build` `Command` and training through `train`,
+> so it behaves identically in single-player, split-screen (T24) and LAN (T25). Numbers are starting
+> balance (tunable in T21). **This supersedes T30's multi-miner silver mine** — every mine is now
+> worked by exactly one miner.
+
+**Goal (restated):** cleanly separate the two worker jobs that T0–T30 tangled into the Miner.
+(1) the **Engineer** is the builder — select it, pick a building, it constructs it; the player **starts
+with one Engineer**. (2) the **Miner is mining-only** — it walks to a free mine, goes inside and digs,
+and **only one miner works a mine**; an idle miner with no free mine **waits** and auto-enters the next
+mine built/freed. (3) both train at the **Command Center**: a **Miner for 5 silver** and an
+**Engineer for 20 silver**.
+
+### Scope checklist (T31)
+- [x] A dedicated **Engineer (builder)** constructs buildings — `tryBuild()` dispatches
+      `nearestIdleWorker()` which now returns the nearest idle **Engineer** (no `buildTask`/`captureTask`),
+      and construction's `builderNear` speed check keys off the **Engineer**; it still captures derricks.
+- [x] Selecting an **Engineer** opens the build palette (`hud.ts updatePanel`/`panelHtml`/`minerPanelShown`
+      now find the engineer; header reads "Engineer — Build"); placing dispatches that builder.
+- [x] The **Miner is mining-only** — it no longer takes a `buildTask`; it enters a free mine and digs,
+      hidden on the map (T30 `inMine`).
+- [x] **One miner per mine** for every type (`mineSlotCap()` returns **1**); the silver multi-miner
+      scaling is retired in `economySystem()` and `mineEta()` (single-miner rate).
+- [x] A Miner trained with **no free mine waits** and **auto-enters** the next mine built/freed
+      (`workerSystem()` re-runs `autoAssignMiner()` for idle, unassigned miners; `claimedMiners()` makes
+      miners spread one-per-mine instead of all heading to the nearest).
+- [x] Both workers train at the **Command Center**: **Miner = 5 silver**, **Engineer = 20 silver**
+      (`command_center.produces` now includes `engineer`; engineer cost `{ silver: 20 }`, built at CC + Barracks).
+- [x] The player **starts with one Engineer** (`spawnBase()`), plus the silver mine + its in-mine miner.
+- [x] The **AI** trains an Engineer to build (a second when the first is busy) and Miners one-per-mine,
+      and still expands + fights; SP / split-screen (T24) / LAN (T25) regress cleanly.
+- [x] Strings are **trilingual** (the "assign a miner" hint updated to singular); `localeParity()` passes.
+- [x] New + existing **headless tests pass**; `bash build.sh` is clean.
+
+### Implementation summary
+- **`src/sim/world.ts`:** `nearestIdleWorker()` returns the nearest idle **Engineer** (not a Miner);
+  the construction `builderNear` check looks for an Engineer; on completion the engineer is freed
+  (cleared `buildTask`, no longer auto-sent to a mine). `spawnBase()` spawns a **starting Engineer**.
+  The silver mine yields the **single-miner rate** (`TICK_DT / MINER_OUTPUT_INTERVAL`). `workerSystem()`
+  auto-assigns **idle, unassigned** miners every tick (the "wait then enter" behavior); new
+  `claimedMiners()` (walking + inside) drives `autoAssignMiner()` so miners spread one-per-mine.
+- **`src/constants.ts`:** `mineSlotCap()` returns **1** for every mine type; `mineEta()` silver no
+  longer scales with miner count (one-per-mine single rate).
+- **`src/data.ts`:** `command_center.produces` adds `engineer`; the Engineer costs `{ silver: 20 }` and
+  is built at the Command Center (and Barracks).
+- **`src/ui/hud.ts`:** the build palette / T26–T27 keyboard category navigation now key off a selected
+  **Engineer** (`builder`), with the panel header "Engineer — Build".
+- **`src/sim/ai.ts`:** the AI trains an Engineer to build (and a spare when the first is busy) and
+  Miners up to its mine count (one per mine).
+- **`src/i18n.ts`:** the idle-mine hint now reads "assign **a** miner" (uz/ru/en).
+
+### How each DoD line was verified
+**Quality gate.** `bash build.sh` is clean (client + server, zero TS errors). **Twenty-six** suites
+pass — the prior twenty-five plus the new **`workers`** suite (and `mineeta` updated for the
+single-miner silver rate).
+
+- **Worker roles / start units.** `test/workers.mjs` proves `spawnBase` yields exactly **one starting
+  Engineer** (a free unit) plus the in-mine miner; `tryBuild` puts the `buildTask` on the **Engineer**
+  and **never** on a Miner; `nearestIdleWorker` only returns engineers; and a constructing building
+  advances **faster** with the engineer-builder present.
+- **One miner per mine.** `mineSlotCap` is **1** for every type; two miners sent to one mine → only
+  one works it (the other re-routes); `autoAssignMiner` sends two idle miners to two **different** free
+  mines (via `claimedMiners`).
+- **Idle wait + auto-enter.** A Miner trained with every mine staffed **waits** (no assignment); once a
+  fresh mine appears it is **auto-assigned and enters** it.
+- **Train costs.** The Miner costs 5 silver and the Engineer 20 silver, both produced at the CC.
+- **No regression.** All prior suites — including `smoke` (starting silver mine + 1 miner still
+  +1 / 10 s, `localeParity`), `minework`, `host`/`net`/`stress` (fog / anti-maphack), `production`,
+  `research`, `power`, `basetech`, `upgrades` — stay green; only the worker role assignment + mine
+  occupancy changed, not the netcode or split-screen routing.
+
+**[OPT] deferred:** none. (The Engineer retains its oil-derrick capture role; right-clicking a mine
+with a Miner still issues the `mine` command, and right-clicking a derrick with an Engineer still
+captures.) No required T31 scope item is dropped.

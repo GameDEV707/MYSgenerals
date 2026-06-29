@@ -6,7 +6,7 @@ import {
 } from "../types.js";
 import { UNIT_DEFS, BUILDING_DEFS, damageMultiplier, RESEARCH_BY_ID, ResearchDef } from "../data.js";
 import {
-  TICK_DT, START_SILVER, MINER_OUTPUT_INTERVAL, SILVER_MINE_SLOTS, IRON_INTERVAL, GOLD_INTERVAL,
+  TICK_DT, START_SILVER, MINER_OUTPUT_INTERVAL, IRON_INTERVAL, GOLD_INTERVAL,
   OIL_INTERVAL, CC_POWER, BROWNOUT_PRODUCTION_MULT, BROWNOUT_TOWER_FIRE_MULT, BROWNOUT_TOWER_RANGE_MULT,
   SELL_REFUND, CANCEL_QUEUED_REFUND, CANCEL_INPROGRESS_REFUND, BUILD_RADIUS, MAX_QUEUE,
   HERO_RESPAWN_BASE, HERO_RESPAWN_PER_LEVEL, HERO_XP_PER_LEVEL, HERO_PASSIVE_XP, HERO_MAX_LEVEL,
@@ -245,6 +245,8 @@ export class World {
     miner.mineId = mine.id; miner.mining = true; miner.inMine = true;
     miner.pos = { x: mine.pos.x, y: mine.pos.y };
     mine.minerSlots = 1;
+    // T31: a starting Engineer (builder) on the field, so the player can build from the first second
+    this.spawn("unit", "engineer", owner, spawn.x + 2, spawn.y + 3);
     // hero
     const hero = this.spawn("unit", "hero", owner, spawn.x + 2, spawn.y + 2);
     hero.hero = { mana: 100, maxMana: 100, abilities: [{ rank: 0, cdUntil: 0 }, { rank: 0, cdUntil: 0 }, { rank: 0, cdUntil: 0 }, { rank: 0, cdUntil: 0 }], burstShots: 0, burstBonus: 0, invulnUntil: 0 };
@@ -387,7 +389,7 @@ export class World {
     this.pay(p, def.cost);
     const b = this.spawn("building", cmd.building, cmd.owner, cmd.x, cmd.y);
     b.constructing = true; b.buildTotal = def.buildTime; b.buildProgress = 0; b.hp = Math.max(1, def.hp * 0.1);
-    // dispatch nearest idle miner for fidelity
+    // T31: dispatch the nearest idle ENGINEER (builder) to construct it
     const builder = this.nearestIdleWorker(cmd.owner, b.pos);
     if (builder) { builder.buildTask = { bid: cmd.building, pos: { ...b.pos }, entId: b.id }; this.setMove(builder, b.pos.x, b.pos.y); }
     this.events.push({ e: "construct", pos: b.pos });
@@ -414,11 +416,13 @@ export class World {
     return true;
   }
 
+  // T31: the builder is the ENGINEER (the Miner is mining-only). Find the nearest idle engineer —
+  // one not already constructing (buildTask) or capturing (captureTask).
   nearestIdleWorker(owner: number, pos: Vec2): Entity | null {
     let best: Entity | null = null; let bd = 1e9;
     for (const e of this.entities) {
-      if (e.owner !== owner || e.type !== "miner" || e.dead) continue;
-      if (e.buildTask || e.mining || e.mineId != null) continue; // don't pull mining/assigned miners
+      if (e.owner !== owner || e.type !== "engineer" || e.dead) continue;
+      if (e.buildTask || e.captureTask) continue; // don't pull a busy engineer
       const d = this.dist(e.pos, pos);
       if (d < bd) { bd = d; best = e; }
     }
@@ -619,9 +623,9 @@ export class World {
     for (const e of this.entities) {
       if (e.dead || e.constructing) continue;
       if (e.type === "silver_mine") {
-        const slots = Math.min(e.minerSlots, SILVER_MINE_SLOTS);
-        if (slots > 0) {
-          e.resAccum += (slots / MINER_OUTPUT_INTERVAL) * TICK_DT;
+        // T31: one miner works a silver mine → its single-miner rate (no multi-miner scaling).
+        if (e.minerSlots > 0) {
+          e.resAccum += TICK_DT / MINER_OUTPUT_INTERVAL;
           while (e.resAccum >= 1) { e.resAccum -= 1; this.players[e.owner].silver += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" }); }
         }
       } else if (e.type === "iron_mine") {
@@ -649,14 +653,15 @@ export class World {
       if (e.kind !== "building" || e.dead) continue;
       if (e.constructing) {
         // progress while a builder is near OR fallback slow rate to avoid stalls
-        const builderNear = this.entities.some((m) => m.type === "miner" && m.owner === e.owner && !m.dead && m.buildTask && m.buildTask.entId === e.id && this.dist(m.pos, e.pos) < e.radius + 1.5);
+        const builderNear = this.entities.some((m) => m.type === "engineer" && m.owner === e.owner && !m.dead && m.buildTask && m.buildTask.entId === e.id && this.dist(m.pos, e.pos) < e.radius + 1.5);
         const rate = builderNear ? 1 : 0.5;
         e.buildProgress += (TICK_DT / e.buildTotal) * rate;
         e.hp = Math.min(e.maxHp, e.maxHp * (0.1 + 0.9 * e.buildProgress));
         if (e.buildProgress >= 1) {
           e.constructing = false; e.buildProgress = 1; e.hp = e.maxHp;
           this.events.push({ e: "toast", key: "toast.buildComplete", kind: "ok", to: e.owner });
-          for (const m of this.entities) if (m.buildTask && m.buildTask.entId === e.id) { m.buildTask = null; this.autoAssignMiner(m); }
+          // T31: free the engineer-builder (it idles near the finished building, ready for the next job).
+          for (const m of this.entities) if (m.buildTask && m.buildTask.entId === e.id) { m.buildTask = null; m.moveTarget = null; m.path = []; }
         }
         continue;
       }
@@ -705,7 +710,7 @@ export class World {
     this.events.push({ e: "toast", key: "toast.unitReadyNamed", kind: "ok", params: { unit: UNIT_DEFS[unit].nameKey }, to: b.owner });
   }
 
-  // ---------- workers (spec §6.3; T30: every mine type, miners enter & hide) ----------
+  // ---------- workers (spec §6.3; T30: miners enter & hide; T31: one miner per mine, idle miners wait) ----------
   private workerSystem(): void {
     for (const e of this.entities) {
       if (e.type !== "miner" || e.dead) continue;
@@ -725,6 +730,10 @@ export class World {
             }
           }
         }
+      } else if (!e.mining && !e.inMine && e.path.length === 0 && e.moveTarget == null) {
+        // T31 B3: an idle, unassigned miner WAITS near the base and auto-enters the next mine that is
+        // built or freed (one miner per mine) — no manual micro needed.
+        this.autoAssignMiner(e);
       }
     }
     // recount occupancy authoritatively for ALL mine types (capped by the per-type slot count)
@@ -736,6 +745,13 @@ export class World {
   countMiners(mineId: number): number {
     let n = 0;
     for (const e of this.entities) if (e.type === "miner" && !e.dead && e.mining && e.mineId === mineId) n++;
+    return n;
+  }
+  // T31: miners that have CLAIMED a mine (walking toward it or already inside) — used so two idle
+  // miners assigned together pick two different mines instead of both heading to the nearest one.
+  claimedMiners(mineId: number): number {
+    let n = 0;
+    for (const e of this.entities) if (e.type === "miner" && !e.dead && e.mineId === mineId) n++;
     return n;
   }
   // T30: release every miner working inside a mine that is being destroyed/sold — eject them next to
@@ -750,11 +766,12 @@ export class World {
     }
   }
   autoAssignMiner(m: Entity): void {
-    // T30: send an idle miner to the nearest owned, built mine of ANY type with a free work slot.
+    // T30/T31: send an idle miner to the nearest owned, built mine that has no miner yet (one per
+    // mine). "Claimed" counts miners already walking toward / inside a mine, so miners spread out.
     let best: Entity | null = null; let bd = 1e9;
     for (const e of this.entities) {
       if (!isMineType(e.type) || e.dead || e.owner !== m.owner || e.owner === NEUTRAL || e.constructing) continue;
-      if (this.countMiners(e.id) >= mineSlotCap(e.type)) continue;
+      if (this.claimedMiners(e.id) >= mineSlotCap(e.type)) continue;
       const d = this.dist(e.pos, m.pos); if (d < bd) { bd = d; best = e; }
     }
     if (best) { m.mineId = best.id; m.mining = false; m.inMine = false; this.setMove(m, best.pos.x, best.pos.y); }

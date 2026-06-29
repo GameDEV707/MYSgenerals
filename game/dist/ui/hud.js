@@ -182,19 +182,21 @@ export class HUD {
         }
         const sel = this.selectedEntities();
         const own = sel.filter((e) => e.owner === me);
-        const miner = own.find((e) => e.type === "miner");
+        // T31: the build menu opens on the ENGINEER (builder), not the Miner (which is mining-only and
+        // usually working inside a mine, hidden).
+        const builder = own.find((e) => e.type === "engineer");
         const research = own.find((e) => e.kind === "building" && e.type === "research_center");
         const prod = own.find((e) => e.kind === "building" && BUILDING_DEFS[e.type].produces);
-        // T27 Part A: category-focus only applies to the miner build panel; drop it otherwise.
-        const minerPanel = !!miner && !research && !prod;
-        if (!minerPanel && this.catFocus >= 0)
+        // T27 Part A: category-focus only applies to the builder build panel; drop it otherwise.
+        const builderPanel = !!builder && !research && !prod;
+        if (!builderPanel && this.catFocus >= 0)
             this.catFocus = -1;
         const kb = this.input.control === "p1-keyboard" ? "K" : "";
         // T30: include each own building's level + whether it is upgrading (NOT progress — the live bar
         // is drawn on the map), and the player's base level (drives the build-menu locks), so the panel
         // rebuilds when the CC levels up or a tower upgrade completes/starts.
         let sig = own.map((e) => e.id + e.type + ":" + e.level + (e.upgrading ? "U" + e.upgrading.to : "")).join(",")
-            + "|" + this.tab + "|" + kb + (miner ? "m" : "") + "|F" + this.catFocus + "|BL" + this.baseLevel();
+            + "|" + this.tab + "|" + kb + (builder ? "b" : "") + "|F" + this.catFocus + "|BL" + this.baseLevel();
         if (prod)
             sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".");
         if (research) {
@@ -207,7 +209,7 @@ export class HUD {
         panel.style.display = this.layout.commands?.hidden ? "none" : ""; // restore after placement ends
         if (sig !== this.sig) {
             this.sig = sig;
-            panel.innerHTML = this.panelHtml(own, miner, prod, research);
+            panel.innerHTML = this.panelHtml(own, builder, prod, research);
             this.decorateNumberBadges(panel);
         }
         if (prod)
@@ -265,15 +267,15 @@ export class HUD {
         if (tm)
             tm.textContent = Math.ceil((1 - rc.researching.progress) * rc.researching.time) + "s";
     }
-    panelHtml(own, miner, prod, research) {
+    panelHtml(own, builder, prod, research) {
         if (research)
             return this.researchPanelHtml(research);
         if (prod)
             return this.prodPanelHtml(prod);
-        if (miner) {
+        if (builder) {
             const tabs = this.CATS.map((c, i) => `<div class="tab ${this.tab === c ? "active" : ""}${this.catFocus === i ? " focus" : ""}" data-act="tab" data-cat="${c}">${t("cat." + c)}</div>`).join("");
             const list = (BUILD_MENU[this.tab] || []).map((b) => this.buildBtn(b)).join("");
-            return `<h4>${t("units.miner.name")} — ${t("cat.build")}</h4>
+            return `<h4>${t("units.engineer.name")} — ${t("cat.build")}</h4>
         <div class="tabs">${tabs}</div><div class="grid">${list}</div>`;
         }
         if (own.some((e) => e.kind === "unit")) {
@@ -581,15 +583,15 @@ export class HUD {
         this.catFocus = -1;
         this.sig = "";
     }
-    // T27 Part A — keyboard category-focus navigation. Only active while the miner build panel (the
-    // economy/military/defense/tech tabs) is shown.
+    // T27 Part A — keyboard category-focus navigation. Only active while the builder (Engineer) build
+    // panel (the economy/military/defense/tech tabs) is shown. (T31: the builder is the Engineer.)
     minerPanelShown() {
         const me = this.world.me;
         const own = this.selectedEntities().filter((e) => e.owner === me);
-        const miner = own.find((e) => e.type === "miner");
+        const builder = own.find((e) => e.type === "engineer");
         const research = own.find((e) => e.kind === "building" && e.type === "research_center");
         const prod = own.find((e) => e.kind === "building" && BUILDING_DEFS[e.type].produces);
-        return !!miner && !research && !prod;
+        return !!builder && !research && !prod;
     }
     // Space: move the focus highlight to the next category (previews only — does not switch the tab).
     focusNextCategory() {

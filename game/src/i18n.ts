@@ -312,6 +312,9 @@ const en: Dict = {
   "online.badCode": "That invite code isn't valid.",
   "online.hint": "Online play is peer-to-peer: paste the host's invite, send back the reply code it produces, and you'll connect directly — no server.",
   "online.copyReply": "Copy reply",
+  "lobby.onlineSplit": "Split-screen — add a 2nd player on this device",
+  "lobby.onlineSplitHint": "Play with a friend on this same device while another joins online. Pick a 3–4 player map so a slot is left for the online friend.",
+  "lobby.player2Name": "Player 2 name",
 };
 
 const ru: Dict = {
@@ -622,6 +625,9 @@ const ru: Dict = {
   "online.badCode": "Этот код приглашения недействителен.",
   "online.hint": "Онлайн-игра работает peer-to-peer: вставьте приглашение хоста, отправьте обратно созданный ответный код — и вы подключитесь напрямую, без сервера.",
   "online.copyReply": "Копировать ответ",
+  "lobby.onlineSplit": "Разделённый экран — добавить 2-го игрока на этом устройстве",
+  "lobby.onlineSplitHint": "Играйте с другом на этом же устройстве, пока ещё один подключается онлайн. Выберите карту на 3–4 игроков, чтобы остался слот для онлайн-друга.",
+  "lobby.player2Name": "Имя игрока 2",
 };
 
 const uz: Dict = {
@@ -932,6 +938,9 @@ const uz: Dict = {
   "online.badCode": "Bu taklif kodi notoʻgʻri.",
   "online.hint": "Onlayn oʻyin peer-to-peer ishlaydi: xostning taklifini joylashtiring, hosil boʻlgan javob kodini qaytaring — va siz serversiz toʻgʻridan-toʻgʻri ulanasiz.",
   "online.copyReply": "Javobni nusxalash",
+  "lobby.onlineSplit": "Boʻlingan ekran — shu qurilmaga 2-oʻyinchini qoʻshish",
+  "lobby.onlineSplitHint": "Yana biri onlayn ulanayotganda doʻstingiz bilan shu qurilmada birga oʻynang. Onlayn doʻst uchun joy qolishi uchun 3–4 oʻyinchilik xaritani tanlang.",
+  "lobby.player2Name": "2-oʻyinchi ismi",
 };
 
 const LOCALES: Record<Lang, Dict> = { en, ru, uz };

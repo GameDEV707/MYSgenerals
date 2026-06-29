@@ -6,9 +6,10 @@ import { getMap, MAP_IDS } from "../sim/map.js";
 import { qrMatrix } from "../net/qr.js";
 import { LobbyState, ServerMsg } from "../net/protocol.js";
 import { SocketTransport } from "../net/socketTransport.js";
-import { ClientTransport, LobbyClient, RemoteClientCallbacks } from "../net/transport.js";
+import { LobbyClient, RemoteClientCallbacks } from "../net/transport.js";
 import { BrowserHost, PendingInvite } from "../net/webrtcHost.js";
 import { joinOnline, WebRTCTransport } from "../net/webrtcTransport.js";
+import { RemoteLocalSpec } from "../client/remoteSession.js";
 import { LobbyMode, showInvitePanel, showLanInfo } from "./lobbyMode.js";
 import { SplitInputConfig, PointerDevice, loadSplitInput, saveSplitInput, resolveSplitInput, hasTouch } from "../client/splitInput.js";
 import { ACTION_DEFS, getKeyBindings, keyLabel, setBinding, resetKeyBindings, normalizeKey, BindContext } from "./keyBindings.js";
@@ -18,9 +19,10 @@ export interface MenuCallbacks {
   onStartLocal: (cfg: SessionConfig) => void;
   onJoin: (opts: { url: string; name: string }, ui: JoinUI) => void;
   // Enter a match as a thin client of a remote/online host (LAN, WebRTC P2P, or the in-browser
-  // host's own loopback player). main.ts owns the RemoteSession; the menu just hands it a connected
-  // transport + the start message (spec §24 T33).
-  onRemoteMatch?: (transport: ClientTransport, startMsg: Extract<ServerMsg, { m: "start" }>) => void;
+  // host's own loopback player(s)). main.ts owns the RemoteSession; the menu hands it the connected
+  // local player(s) + the start message. Two locals + split=true means online split-screen on one
+  // device (spec §24 T33).
+  onRemoteMatch?: (locals: RemoteLocalSpec[], startMsg: Extract<ServerMsg, { m: "start" }>, split: boolean) => void;
 }
 
 const MAPS = MAP_IDS;
@@ -35,6 +37,10 @@ export class Menu {
   private browserHost: BrowserHost | null = null;
   private pendingInvite: PendingInvite | null = null;
   private joinPc: RTCPeerConnection | null = null;
+  // Online split-screen: whether the host added a local Player 2, and that player's slot index
+  // (so the lobby UI can show its name field and suppress the kick button on it).
+  private onlineSplit = false;
+  private localBSlot = -1;
 
   constructor(root: HTMLElement, cb: MenuCallbacks) {
     this.root = root; this.cb = cb;
@@ -171,6 +177,7 @@ export class Menu {
             <label class="splitrow"><input type="checkbox" data-id="l-split" ${st.splitScreen ? "checked" : ""}/> ${t("lobby.splitScreen")}</label>
             <div class="dim" style="font-size:11px">${t("lobby.splitHint")}</div>
             ${st.splitScreen ? this.splitInputHtml() : ""}
+            ${st.splitScreen && lobby.splitB >= 0 ? `<div class="field" style="margin-top:8px"><label>${t("lobby.player2Name")}</label><input data-id="l-nameb" maxlength="20" value="${this.escAttr(st.slots[lobby.splitB]?.name || "Player B")}"/></div>` : ""}
             <div class="row" style="margin-top:10px">
               <button class="btn" data-id="l-addai">${t("lobby.addAI")}</button>
               <button class="btn primary" data-id="l-start" ${lobby.canStart() ? "" : "disabled"}>${t("lobby.start")}</button>
@@ -198,6 +205,9 @@ export class Menu {
     // Editable host name (persisted → defaultName for next session and for online/LAN slots).
     const nameInput = scr.querySelector("[data-id=l-name]") as HTMLInputElement | null;
     if (nameInput) nameInput.onchange = () => { const v = nameInput.value.trim() || "Host"; lobby.setName(0, v); setDefaultName(v); };
+    // Editable Player 2 (split-screen) name.
+    const nameBInput = scr.querySelector("[data-id=l-nameb]") as HTMLInputElement | null;
+    if (nameBInput) nameBInput.onchange = () => { if (lobby.splitB >= 0) lobby.setName(lobby.splitB, nameBInput.value.trim() || "Player B"); };
     // Local/Online toggle: flipping to Online tears down the local lobby and starts the in-browser
     // P2P host (spec §24 T33-C1).
     (scr.querySelector("[data-id=ct-online]") as HTMLElement | null)?.addEventListener("click", () => {
@@ -244,13 +254,19 @@ export class Menu {
     if (!left) return;
     const right = scr.querySelector("[data-id=si-right]") as HTMLSelectElement;
     const swap = scr.querySelector("[data-id=si-swap]") as HTMLElement;
-    const commit = () => { saveSplitInput(this.splitInput); this.renderLobby(); };
+    const commit = () => { saveSplitInput(this.splitInput); this.rerenderHostLobby(); };
     left.onchange = () => { this.splitInput.left = left.value as PointerDevice; commit(); };
     right.onchange = () => { this.splitInput.right = right.value as PointerDevice; commit(); };
     swap.onclick = () => {
       const tmp = this.splitInput.left; this.splitInput.left = this.splitInput.right; this.splitInput.right = tmp;
       commit();
     };
+  }
+
+  // Re-render whichever host lobby is active (local renderLobby or the online-host remote lobby).
+  private rerenderHostLobby(): void {
+    if (this.lobby) this.renderLobby();
+    else if (this.browserHost) this.showRemoteLobby(this.browserHost.gameHost.publicState(), this.browserHost.local, "online-host");
   }
 
   private slotHtml(s: import("../net/protocol.js").LobbySlot): string {
@@ -262,13 +278,13 @@ export class Menu {
     else if (s.kind === "closed") right = `<span class="dim">${t("lobby.closed")}</span><button class="btn tiny" data-slot="${s.index}" data-slot-act="open">${t("lobby.openSlot")}</button>`;
     else if (s.kind === "ai") right = `<span class="badge">${t("lobby.aiPlayer")} · ${t("menu." + (s.ai || "normal"))}</span><button class="btn tiny" data-slot="${s.index}" data-slot-act="kick">${t("lobby.kick")}</button>`;
     else if (s.kind === "human") {
-      const label = isHostSlot ? t("lobby.host") : (s.token ? s.name : t("lobby.playerB"));
+      const label = isHostSlot ? (s.name && s.name !== "Host" ? s.name : t("lobby.host")) : (s.name || t("lobby.playerB"));
       const readyBtn = isHostSlot ? `<button class="btn tiny ${s.ready ? "primary" : ""}" data-slot="${s.index}" data-slot-act="ready">${s.ready ? t("lobby.ready") : t("lobby.notReady")}</button>` : `<span class="badge ${s.ready ? "ok" : ""}">${s.ready ? t("lobby.ready") : t("lobby.notReady")}</span>`;
       const kick = (!isHostSlot && s.token) ? `<button class="btn tiny" data-slot="${s.index}" data-slot-act="kick">${t("lobby.kick")}</button>` : "";
       right = `<span class="badge">${label}${isHostSlot ? " (" + t("lobby.you") + ")" : ""}</span>${readyBtn}${kick}`;
     }
     const heroLabel = (s.kind === "human" || s.kind === "ai") ? `<span class="hero">${t("menu.heroCommander")}</span>` : "";
-    const name = s.kind === "human" ? (isHostSlot ? t("lobby.host") : (s.token ? s.name : t("lobby.playerB"))) : s.kind === "ai" ? t("lobby.aiPlayer") : t("lobby.empty");
+    const name = s.kind === "human" ? (isHostSlot ? (s.name && s.name !== "Host" ? s.name : t("lobby.host")) : (s.name || t("lobby.playerB"))) : s.kind === "ai" ? t("lobby.aiPlayer") : t("lobby.empty");
     return `<div class="slot ${s.kind}">
       <span class="slot-dot" style="background:${(s.kind === "human" || s.kind === "ai") ? s.color : "#2a3a4a"}"></span>
       <span class="slot-name">${name}</span>
@@ -485,6 +501,14 @@ export class Menu {
       </div>
       <div class="dim" style="font-size:12px;margin-top:6px">${state.slots.filter((s) => s.kind === "human").every((s) => s.ready) ? t("lobby.allReady") : t("lobby.waitingHost")}</div>`;
 
+    // Online host can add a 2nd LOCAL player on this device (split-screen) alongside the online
+    // friend(s) — pick a 3–4 player map to leave a slot for the friend (spec §21 / §24 T33).
+    const onlineSplitHtml = (mode === "online-host" && isHost) ? `
+      <label class="splitrow" style="margin-top:10px"><input type="checkbox" data-id="rl-split" ${this.onlineSplit ? "checked" : ""}/> ${t("lobby.onlineSplit")}</label>
+      <div class="dim" style="font-size:11px">${t("lobby.onlineSplitHint")}</div>
+      ${this.onlineSplit ? this.splitInputHtml() : ""}
+      ${this.onlineSplit && this.localBSlot >= 0 ? `<div class="field" style="margin-top:8px"><label>${t("lobby.player2Name")}</label><input data-id="rl-nameb" maxlength="20" value="${this.escAttr(state.slots[this.localBSlot]?.name || "Player 2")}"/></div>` : ""}` : "";
+
     const scr = this.el(`<div class="screen lobby-screen" data-screen="rlobby">
       ${this.langSwitch()}
       <div class="lobby">
@@ -497,6 +521,7 @@ export class Menu {
             </div>
             <div class="slots" data-id="rl-slots">${state.slots.map((s) => this.remoteSlotHtml(s, isHost)).join("")}</div>
             ${mySlot && mySlot.kind === "human" ? `<div class="field" style="margin-top:8px"><label>${t("lobby.yourName")}</label><input data-id="rl-name" maxlength="20" value="${this.escAttr(mySlot.name)}"/></div>` : ""}
+            ${onlineSplitHtml}
             ${isHost ? hostControls : guestControls}
           </div>
           <div class="lobby-conn">
@@ -530,6 +555,27 @@ export class Menu {
     // Online host: wire the invite/reply controls + Local toggle.
     if (showInvitePanel(mode)) this.wireInvitePanel(scr);
 
+    // Online host split-screen: toggle a 2nd LOCAL player + its input devices + editable name.
+    if (mode === "online-host" && isHost) {
+      const splitCb = scr.querySelector("[data-id=rl-split]") as HTMLInputElement | null;
+      if (splitCb) splitCb.onchange = () => {
+        if (!this.browserHost) return;
+        if (splitCb.checked) {
+          this.onlineSplit = true;
+          this.browserHost.addLocalB("Player 2");
+          this.localBSlot = this.browserHost.localB ? this.browserHost.localB.playerId : -1;
+        } else {
+          this.onlineSplit = false;
+          this.browserHost.removeLocalB();
+          this.localBSlot = -1;
+        }
+        this.showRemoteLobby(this.browserHost.gameHost.publicState(), this.browserHost.local, "online-host");
+      };
+      if (this.onlineSplit) this.wireSplitInput(scr); // re-renders via showRemoteLobby below on change
+      const nameB = scr.querySelector("[data-id=rl-nameb]") as HTMLInputElement | null;
+      if (nameB) nameB.onchange = () => { this.browserHost?.localB?.sendLobbyAction({ a: "setName", name: nameB.value.trim() || "Player 2" }); };
+    }
+
     // Back / leave the lobby (tear down the online host if we are it).
     (scr.querySelector("[data-id=rl-back]") as HTMLElement).onclick = () => {
       transport.close();
@@ -543,8 +589,12 @@ export class Menu {
         transport.sendLobbyAction({ a: "setMap", map: (e.target as HTMLSelectElement).value });
       (scr.querySelector("[data-id=rl-addai]") as HTMLElement).onclick = () =>
         transport.sendLobbyAction({ a: "addAI", diff: "normal" });
-      (scr.querySelector("[data-id=rl-start]") as HTMLElement).onclick = () =>
+      (scr.querySelector("[data-id=rl-start]") as HTMLElement).onclick = () => {
+        // The host's Start implies readiness (no separate host ready button); ready then start so
+        // the server-side canStart (every human ready, incl. the host) is satisfied.
+        transport.sendLobbyAction({ a: "ready", ready: true });
         transport.sendLobbyAction({ a: "start" });
+      };
       // Host-only per-slot management.
       scr.querySelectorAll<HTMLElement>("[data-rl-act]").forEach((b) => {
         b.onclick = () => {
@@ -571,12 +621,15 @@ export class Menu {
     });
   }
 
-  // Same rule the host enforces (≥2 participants and all humans ready) so the Start button
-  // matches what the server will accept.
+  // The host can start once there are ≥2 participants and all OTHER humans are ready. The host's
+  // own readiness is implied by clicking Start (the host has no separate ready button), so slot 0
+  // is excluded here — the Start handler sends ready+start so the server-side canStart (which does
+  // require every human ready, incl. the host) is satisfied. Local split-screen Player B is
+  // auto-readied on join, so it never blocks Start either.
   private canStartRemote(state: LobbyState): boolean {
     const participants = state.slots.filter((s) => s.kind === "human" || s.kind === "ai");
     if (participants.length < 2) return false;
-    return state.slots.filter((s) => s.kind === "human").every((s) => s.ready);
+    return state.slots.filter((s) => s.kind === "human" && s.index !== 0).every((s) => s.ready);
   }
 
   private remoteSlotHtml(s: import("../net/protocol.js").LobbySlot, isHost: boolean): string {
@@ -594,7 +647,7 @@ export class Menu {
     if (isHost && s.index !== 0) {
       if (s.kind === "open") hostBtns = `<button class="btn tiny" data-rl-slot="${s.index}" data-rl-act="addai">${t("lobby.addAI")}</button><button class="btn tiny" data-rl-slot="${s.index}" data-rl-act="close">${t("lobby.closeSlot")}</button>`;
       else if (s.kind === "closed") hostBtns = `<button class="btn tiny" data-rl-slot="${s.index}" data-rl-act="open">${t("lobby.openSlot")}</button>`;
-      else hostBtns = `<button class="btn tiny" data-rl-slot="${s.index}" data-rl-act="kick">${t("lobby.kick")}</button>`;
+      else if (s.index !== this.localBSlot) hostBtns = `<button class="btn tiny" data-rl-slot="${s.index}" data-rl-act="kick">${t("lobby.kick")}</button>`;
     }
     return `<div class="slot ${s.kind}">
       <span class="slot-dot" style="background:${(s.kind === "human" || s.kind === "ai") ? s.color : "#2a3a4a"}"></span>
@@ -714,7 +767,23 @@ export class Menu {
     this.lobby = null;
     const cb: RemoteClientCallbacks = {
       onLobby: (state) => { if (this.browserHost) this.showRemoteLobby(state, this.browserHost.local, "online-host"); },
-      onStart: (startMsg) => { if (this.browserHost) this.cb.onRemoteMatch?.(this.browserHost.local, startMsg); },
+      onStart: (startMsg) => {
+        if (!this.browserHost) return;
+        const resolved = this.onlineSplit ? resolveSplitInput(this.splitInput) : [];
+        const locals: RemoteLocalSpec[] = [{
+          transport: this.browserHost.local, playerId: startMsg.you,
+          pointerType: this.onlineSplit ? (resolved[0]?.pointerType ?? null) : null,
+          keyboard: this.onlineSplit ? (resolved[0]?.keyboard ?? false) : true,
+          control: this.onlineSplit ? (resolved[0]?.control ?? "single") : "single",
+        }];
+        if (this.onlineSplit && this.browserHost.localB) {
+          locals.push({
+            transport: this.browserHost.localB, playerId: this.browserHost.localB.playerId,
+            pointerType: resolved[1]?.pointerType ?? null, keyboard: resolved[1]?.keyboard ?? false, control: resolved[1]?.control ?? "single",
+          });
+        }
+        this.cb.onRemoteMatch?.(locals, startMsg, this.onlineSplit && locals.length >= 2);
+      },
       onHostGone: () => { this.teardownOnline(); this.showTitle(); },
     };
     this.browserHost = new BrowserHost(defaultName(), cb);
@@ -725,6 +794,8 @@ export class Menu {
   teardownOnline(): void {
     if (this.browserHost) { try { this.browserHost.stop(); } catch { /* */ } this.browserHost = null; }
     this.pendingInvite = null;
+    this.onlineSplit = false;
+    this.localBSlot = -1;
     if (this.joinPc) { try { this.joinPc.close(); } catch { /* */ } this.joinPc = null; }
   }
 
@@ -762,7 +833,7 @@ export class Menu {
       let transport: WebRTCTransport | null = null;
       const cb: RemoteClientCallbacks = {
         onLobby: (state) => { if (transport) this.showRemoteLobby(state, transport, "online-guest"); },
-        onStart: (startMsg) => { if (transport) this.cb.onRemoteMatch?.(transport, startMsg); },
+        onStart: (startMsg) => { if (transport) this.cb.onRemoteMatch?.([{ transport, playerId: startMsg.you, pointerType: null, keyboard: true, control: "single" }], startMsg, false); },
         onError: (_r, key) => setStatus(key || "online.connectFailed", true),
         onHostGone: () => { this.teardownOnline(); this.showTitle(); },
       };

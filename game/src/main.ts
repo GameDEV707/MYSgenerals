@@ -7,9 +7,8 @@ import { initLang, defaultName } from "./i18n.js";
 import { Menu, JoinUI } from "./ui/menu.js";
 import { AudioManager } from "./render/audio.js";
 import { MatchSession } from "./client/session.js";
-import { RemoteSession } from "./client/remoteSession.js";
+import { RemoteSession, RemoteLocalSpec } from "./client/remoteSession.js";
 import { SocketTransport } from "./net/socketTransport.js";
-import { ClientTransport } from "./net/transport.js";
 import { ServerMsg } from "./net/protocol.js";
 
 // Marker injected by the Node host (dist/server/host.js) into the served HTML. When present we know
@@ -38,10 +37,11 @@ function clearSessions(): void {
 }
 
 // Enter a match as a thin client of any host (LAN socket, online WebRTC, or the in-browser host's
-// own loopback player) — the RemoteSession only renders snapshots + sends commands (spec §3.2).
-function enterRemoteMatch(t: ClientTransport, startMsg: Extract<ServerMsg, { m: "start" }>): void {
+// own loopback player(s)) — the RemoteSession only renders snapshots + sends commands (spec §3.2).
+// Two locals + split renders split-screen on one device (e.g. online host + a friend on the couch).
+function enterRemoteMatch(locals: RemoteLocalSpec[], startMsg: Extract<ServerMsg, { m: "start" }>, split: boolean): void {
   remote?.stop();
-  remote = new RemoteSession(canvas, overlay, audio, t, startMsg);
+  remote = new RemoteSession(canvas, overlay, audio, locals, startMsg, split);
   remote.start();
   remote.onQuit = () => { clearSessions(); menu.showTitle(); };
 }
@@ -59,7 +59,7 @@ function connect(rawUrl: string, name: string, ui: JoinUI): void {
   transport = new SocketTransport(base, name, {
     onWelcome: (_playerId, _token) => { ui.setStatus("join.connectingHost"); },
     onLobby: (state) => { if (transport) menu.showRemoteLobby(state, transport, "lan"); },
-    onStart: (startMsg) => { if (transport) enterRemoteMatch(transport, startMsg); },
+    onStart: (startMsg) => { if (transport) enterRemoteMatch([{ transport, playerId: startMsg.you, pointerType: null, keyboard: true, control: "single" }], startMsg, false); },
     onError: (_reason, key) => { ui.setStatus(key || "join.failed", true); },
     onHostGone: () => { clearSessions(); menu.showTitle(); },
     onStateChange: (_s) => { /* tracked internally */ },
@@ -74,8 +74,8 @@ const menu = new Menu(overlay, {
     session.start(cfg);
   },
   onJoin: (opts, ui) => { connect(opts.url, opts.name, ui); },
-  // Online (WebRTC P2P) and the in-browser host's own player both reach the match here.
-  onRemoteMatch: (t, startMsg) => { enterRemoteMatch(t, startMsg); },
+  // Online (WebRTC P2P) and the in-browser host's own player(s) both reach the match here.
+  onRemoteMatch: (locals, startMsg, split) => { enterRemoteMatch(locals, startMsg, split); },
 });
 
 // A page opened with a `#join=<code>` fragment (a shared online invite) jumps straight to the Join

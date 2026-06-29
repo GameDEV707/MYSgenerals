@@ -12,24 +12,28 @@ import { GameHost } from "../host/gameHost.js";
 import { RTC_CONFIG, gatherComplete } from "./webrtcTransport.js";
 import { encodeSignal, decodeSignal } from "./signal.js";
 const LOCAL_PEER = "local-host";
-// The host's own player, as a LobbyClient that talks to the in-tab GameHost directly. Outgoing
+const LOCAL_PEER_B = "local-playerb";
+// The host's own player(s), as LobbyClients that talk to the in-tab GameHost directly. Outgoing
 // ClientMsgs are handed to GameHost as objects (no JSON); incoming ServerMsgs are delivered as
 // objects too — so the host pays no serialization cost for its own snapshots. This is the spec's
 // "host itself via LoopbackTransport", extended to speak the full lobby protocol so the host uses
-// the exact same lobby UI + RemoteSession path as every joiner.
+// the exact same lobby UI + RemoteSession path as every joiner. A SECOND instance (loopback=false)
+// is the local split-screen Player 2 on the host's device (spec §21 / §24 T33).
 export class LoopbackPeerTransport {
-    constructor(host, name, cb) {
+    constructor(host, name, cb, peerId = LOCAL_PEER, loopback = true) {
         this.host = host;
         this.name = name;
         this.cb = cb;
+        this.peerId = peerId;
+        this.loopback = loopback;
         this._playerId = -1;
         this.clientTick = 0;
         this.snapCb = null;
         this.evCb = null;
     }
     connect() {
-        this.host.onPeerConnect(LOCAL_PEER, true); // loopback → claims host slot 0
-        this.host.onPeerMessageObject(LOCAL_PEER, { m: "hello", name: this.name });
+        this.host.onPeerConnect(this.peerId, this.loopback); // loopback host → claims slot 0
+        this.host.onPeerMessageObject(this.peerId, { m: "hello", name: this.name });
     }
     // GameHost → host's own client (object, no parse).
     deliver(msg) {
@@ -64,21 +68,26 @@ export class LoopbackPeerTransport {
     get playerId() { return this._playerId; }
     sendCommand(cmd) {
         const wire = { playerId: this._playerId, clientTick: ++this.clientTick, cmd };
-        this.host.onPeerMessageObject(LOCAL_PEER, { m: "cmd", data: wire });
+        this.host.onPeerMessageObject(this.peerId, { m: "cmd", data: wire });
     }
-    sendLobbyAction(action) { this.host.onPeerMessageObject(LOCAL_PEER, { m: "lobby", action }); }
+    sendLobbyAction(action) { this.host.onPeerMessageObject(this.peerId, { m: "lobby", action }); }
     onSnapshot(cb) { this.snapCb = cb; }
     onEvent(cb) { this.evCb = cb; }
-    close() { this.host.onPeerDisconnect(LOCAL_PEER); this.snapCb = null; this.evCb = null; }
+    close() { this.host.onPeerDisconnect(this.peerId); this.snapCb = null; this.evCb = null; }
 }
 export class BrowserHost {
     constructor(name, cb) {
+        this.localB = null; // Player B — local split-screen 2nd player (optional)
         this.peers = new Map();
         this.seq = 0;
         const sink = {
             send: (peerId, msg) => {
                 if (peerId === LOCAL_PEER) {
                     this.local.deliver(msg);
+                    return;
+                }
+                if (peerId === LOCAL_PEER_B) {
+                    this.localB?.deliver(msg);
                     return;
                 }
                 const p = this.peers.get(peerId);
@@ -90,7 +99,7 @@ export class BrowserHost {
                 }
             },
             disconnect: (peerId) => {
-                if (peerId === LOCAL_PEER)
+                if (peerId === LOCAL_PEER || peerId === LOCAL_PEER_B)
                     return;
                 const p = this.peers.get(peerId);
                 if (p) {
@@ -108,6 +117,23 @@ export class BrowserHost {
     }
     // Connect the host's own player (claims slot 0) — call once after constructing.
     start() { this.local.connect(); }
+    // Add a 2nd LOCAL player (split-screen Player 2) on the host's device: a second loopback peer
+    // that claims a normal human slot and is auto-readied (it shares the keyboard/screen, so it has
+    // no separate "ready" step). Returns the transport, or the existing one if already added.
+    addLocalB(name) {
+        if (this.localB)
+            return this.localB;
+        this.localB = new LoopbackPeerTransport(this.gameHost, name, {}, LOCAL_PEER_B, false);
+        this.localB.connect();
+        this.localB.sendLobbyAction({ a: "ready", ready: true });
+        return this.localB;
+    }
+    removeLocalB() {
+        if (this.localB) {
+            this.localB.close();
+            this.localB = null;
+        }
+    }
     // Number of remote peers whose data channel is currently open.
     connectedPeers() { let n = 0; for (const p of this.peers.values())
         if (p.connected)
@@ -147,6 +173,7 @@ export class BrowserHost {
     }
     // Tear everything down (host left the lobby / quit the match).
     stop() {
+        this.removeLocalB();
         this.gameHost.shutdown();
         for (const p of this.peers.values()) {
             try {

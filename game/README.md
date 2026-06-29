@@ -225,7 +225,15 @@ link):
 
 The **Local (this device)** toggle (the default) runs single-player, **split-screen** and **vs-AI**
 entirely in the tab with **no launcher**. Every player can also **edit their own name** in the lobby
-(it persists across sessions).
+(it persists across sessions), and when split-screen is on, **both Player 1 and Player 2 get their
+own editable name**.
+
+### Online + split-screen (a friend on the couch *and* a friend online)
+
+When hosting **Online**, you can also tick **"Split-screen — add a 2nd player on this device"** to
+play alongside someone on the same laptop while another friend joins over the internet. Pick a 3–4
+player map so a slot is left for the online friend. Each local player gets their own half of the
+screen, camera and input device; the online friend connects as a normal P2P peer.
 
 ## Multiplayer (LAN)
 
@@ -324,6 +332,7 @@ NODE_OPTIONS="" node test/minefind.mjs     # T32: reachability-aware miner assig
 NODE_OPTIONS="" node test/gamehost.mjs     # T33: transport-agnostic GameHost over a mock peer sink — join/lobby/ready/start, fog snapshots, command ownership
 NODE_OPTIONS="" node test/signal.mjs       # T33: serverless WebRTC invite/reply codec — encode→decode round-trip, tolerant parsing, rejects junk
 NODE_OPTIONS="" node test/online.mjs        # T33: editable-name persistence (localStorage) + Local/Online toggle predicates
+NODE_OPTIONS="" node test/splithost.mjs    # T33: online split-screen (2 local players) + host ready/start gating, over GameHost
 ```
 
 > **Online (WebRTC) is user-verified.** The sandbox has no outbound internet and the headless runner has

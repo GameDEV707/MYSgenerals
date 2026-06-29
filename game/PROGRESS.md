@@ -1533,3 +1533,37 @@ errors**. **Thirty-two** suites pass: the prior twenty-nine plus three new T33 s
 covers the common case and the limitation is documented in-lobby (`lobby.noTurnNote`) and the README; an
 optional free-TURN fallback may be added later. Combining **online and split-screen in one match** is out
 of scope (online is the P2P path, split-screen the local loopback path). No required T33 scope item is dropped.
+
+
+
+### T33 follow-up — online split-screen, editable Player 2 name, and the host ready/start fix
+
+After the initial T33 landed, three lobby gaps were reported and fixed (still transport-layer only;
+sim/protocol/lobby model unchanged):
+
+- **Online + split-screen (was [OPT] deferred).** The online-host lobby now has a **"Split-screen —
+  add a 2nd player on this device"** toggle: ticking it attaches a **second in-page
+  `LoopbackPeerTransport`** (Player B) to the same `GameHost`, claiming a normal human slot and
+  **auto-readied** (it shares the keyboard/screen). On start, the host enters a **split-screen
+  `RemoteSession`** — which was generalized from one local player to **N local players** (a
+  `RemoteBundle` per player: own transport, fog-filtered `WorldView`, camera, HUD and pointer-scoped
+  input, two viewports), mirroring `MatchSession` but as a pure thin client. So one laptop can field
+  two couch players while a third friend joins over WebRTC (pick a 3–4 player map to leave a slot).
+- **Both local players are renamable.** The local lobby previously only let Player 1 rename; now
+  **Player 2 (split-screen) has its own editable name field** (`lobby.setName(splitB, …)`), the
+  online host's Player 2 has one too, and the lobby slot rows display each player's chosen name.
+- **Latent host-can't-start bug.** `showRemoteLobby` never gave the host (slot 0) a ready control,
+  yet `canStart` requires every human ready — so the **browser host (LAN *and* online) could never
+  start a match**. Fixed without touching the lobby model: `canStartRemote` no longer requires the
+  host's own slot to be ready (its **Start implies readiness**), and the host's Start handler sends
+  `ready` then `start`, satisfying the unchanged server-side `canStart` (which still requires all
+  humans ready, incl. the host). Local split-screen Player B is auto-readied so it never blocks Start.
+
+**Verification.** `bash build.sh` clean; **33** headless suites pass (the prior 32 + new
+`test/splithost.mjs`, which drives `GameHost` over a mock sink with **two local players**: Player A
+claims slot 0, Player B claims slot 1 + auto-readies, the match is **gated until the host readies**,
+then `ready`→`start` begins it and both locals receive their own `start` + **fog-filtered** snapshot).
+The live two-window WebRTC + split-screen leg remains **user-verified** (no `RTCPeerConnection`/
+internet in the sandbox). New strings `lobby.onlineSplit` / `lobby.onlineSplitHint` /
+`lobby.player2Name` added in en/ru/uz; `localeParity()` passes. No regression to single-player,
+split-screen (T24) or the LAN host (T25).

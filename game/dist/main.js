@@ -28,10 +28,11 @@ function clearSessions() {
     menu.teardownOnline();
 }
 // Enter a match as a thin client of any host (LAN socket, online WebRTC, or the in-browser host's
-// own loopback player) — the RemoteSession only renders snapshots + sends commands (spec §3.2).
-function enterRemoteMatch(t, startMsg) {
+// own loopback player(s)) — the RemoteSession only renders snapshots + sends commands (spec §3.2).
+// Two locals + split renders split-screen on one device (e.g. online host + a friend on the couch).
+function enterRemoteMatch(locals, startMsg, split) {
     remote?.stop();
-    remote = new RemoteSession(canvas, overlay, audio, t, startMsg);
+    remote = new RemoteSession(canvas, overlay, audio, locals, startMsg, split);
     remote.start();
     remote.onQuit = () => { clearSessions(); menu.showTitle(); };
 }
@@ -50,7 +51,7 @@ function connect(rawUrl, name, ui) {
         onLobby: (state) => { if (transport)
             menu.showRemoteLobby(state, transport, "lan"); },
         onStart: (startMsg) => { if (transport)
-            enterRemoteMatch(transport, startMsg); },
+            enterRemoteMatch([{ transport, playerId: startMsg.you, pointerType: null, keyboard: true, control: "single" }], startMsg, false); },
         onError: (_reason, key) => { ui.setStatus(key || "join.failed", true); },
         onHostGone: () => { clearSessions(); menu.showTitle(); },
         onStateChange: (_s) => { },
@@ -64,8 +65,8 @@ const menu = new Menu(overlay, {
         session.start(cfg);
     },
     onJoin: (opts, ui) => { connect(opts.url, opts.name, ui); },
-    // Online (WebRTC P2P) and the in-browser host's own player both reach the match here.
-    onRemoteMatch: (t, startMsg) => { enterRemoteMatch(t, startMsg); },
+    // Online (WebRTC P2P) and the in-browser host's own player(s) both reach the match here.
+    onRemoteMatch: (locals, startMsg, split) => { enterRemoteMatch(locals, startMsg, split); },
 });
 // A page opened with a `#join=<code>` fragment (a shared online invite) jumps straight to the Join
 // Online screen with the invite pre-filled (spec §24 T33-C2).

@@ -55,6 +55,8 @@ export class GameHost {
     get match() { return this.matchHost; }
     // True once the 20 Hz tick loop is armed (after a match starts). Tests can stop it via shutdown().
     get running() { return this.matchInterval !== null; }
+    // Public (token-stripped) lobby snapshot — used by the in-browser host UI to re-render the lobby.
+    publicState() { return this.publicLobby(); }
     // ---- peer lifecycle (called by the driver) ----
     onPeerConnect(peerId, loopback = false) {
         if (this.peers.has(peerId))

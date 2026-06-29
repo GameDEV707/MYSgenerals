@@ -7,12 +7,19 @@ import { InputController } from "../input.js";
 import { AudioManager } from "../render/audio.js";
 import { BUILDING_DEFS, UNIT_DEFS, BUILD_MENU, RESEARCH_DEFS, RESEARCH_BY_ID } from "../data.js";
 import { BuildingId, UnitId, Cost } from "../types.js";
-import { MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS } from "../constants.js";
+import { MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, powerStatus } from "../constants.js";
 import { t, onLangChange } from "../i18n.js";
 import { HudSide, HudLayout, WidgetState, loadHudLayout, saveHudLayout, clearHudLayout } from "./hudLayout.js";
 import { getKeyBindings, keyLabel, BindContext } from "./keyBindings.js";
 
 const ABILITY_ICONS = ["🔫", "🚩", "💨", "☄"];
+
+// T28 Part A: the hero "super" ability cluster is shown ONLY when the hero is selected (or while
+// editing the HUD layout, so it can be repositioned). Pure + exported for headless testing.
+export function heroPanelShouldShow(heroId: number, selection: Set<number>, editing: boolean): boolean {
+  if (editing) return true;
+  return heroId !== 0 && selection.has(heroId);
+}
 
 interface WidgetMeta { key: string; nameKey: string; resizable: boolean; hideable: boolean; }
 export type { HudSide } from "./hudLayout.js";
@@ -118,13 +125,18 @@ export class HUD {
     this.setText("r-gold", Math.floor(p.gold));
     const powerEl = this.q("power");
     const fill = this.q("power-fill");
+    const status = powerStatus(p.powerGen, p.powerUse);
     if (powerEl && fill) {
       const pct = p.powerGen > 0 ? Math.max(0, Math.min(1, (p.powerGen - p.powerUse) / Math.max(1, p.powerGen))) : 0;
       (fill as HTMLElement).style.width = (p.brownout ? 100 : pct * 100) + "%";
-      powerEl.classList.toggle("deficit", p.brownout);
+      powerEl.classList.toggle("deficit", status === "deficit");
+      powerEl.classList.toggle("low", status === "low");
       this.setText("power-txt", `${p.powerGen}/${p.powerUse}`);
     }
-    const lp = this.q("lowpower"); if (lp) lp.style.display = p.brownout ? "block" : "none";
+    // T28 Part B: warn once usage ≥ 90% of generation; a full deficit (brownout) is the stronger,
+    // "critical" state (the existing production slow-down still applies in the sim).
+    const lp = this.q("lowpower");
+    if (lp) { lp.style.display = status === "ok" ? "none" : "block"; lp.classList.toggle("critical", status === "deficit"); }
     const mins = Math.floor(this.world.time / 60), secs = Math.floor(this.world.time % 60);
     this.setText("timer", `${mins}:${secs.toString().padStart(2, "0")}`);
 
@@ -454,6 +466,12 @@ export class HUD {
   private updateHeroBar(): void {
     const bar = this.q("herobar"); if (!bar) return;
     const p = this.me();
+    // T28 Part A/D: only show the hero cluster when the hero is selected (or while editing layout),
+    // so it no longer floats over the command panel by default.
+    if (this.layout.hero?.hidden || !heroPanelShouldShow(p.heroId, this.r.selection, this.editing)) {
+      bar.style.display = "none"; return;
+    }
+    bar.style.display = "";
     const hero = p.heroId ? this.world.byId.get(p.heroId) : undefined;
     if (!hero || !hero.hero) {
       const respawn = p.heroRespawnAt > 0 ? Math.ceil(p.heroRespawnAt - this.world.time) : 0;

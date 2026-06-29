@@ -28,6 +28,7 @@ export function defaultKeyBindings(): KeyBindings {
       select: "e", command: "q",
       ability1: "z", ability2: "x", ability3: "c", ability4: "v",
       cycleCategory: "space", nextTab: "]", prevTab: "[",
+      zoomIn: "shift", zoomOut: "control",
     },
     p2: {
       ability1: "arrowup", ability2: "arrowright", ability3: "arrowleft", ability4: "arrowdown",
@@ -57,6 +58,8 @@ export const ACTION_DEFS: ActionDef[] = [
   { context: "p1", action: "cycleCategory", labelKey: "key.cycleCategory" },
   { context: "p1", action: "nextTab", labelKey: "key.nextTab" },
   { context: "p1", action: "prevTab", labelKey: "key.prevTab" },
+  { context: "p1", action: "zoomIn", labelKey: "key.zoomIn" },
+  { context: "p1", action: "zoomOut", labelKey: "key.zoomOut" },
   // Player 2 — mouse player hero abilities
   { context: "p2", action: "ability1", labelKey: "key.ability1" },
   { context: "p2", action: "ability2", labelKey: "key.ability2" },

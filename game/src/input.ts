@@ -480,6 +480,17 @@ export class InputController {
     if (this.keys.has(b.cursorRight)) dx += 1;
     if (dx && dy) { const inv = Math.SQRT1_2; dx *= inv; dy *= inv; }
     this._cx += dx * csp; this._cy += dy * csp;
+    // T28 Part C: held keyboard zoom — zoom about the cursor, clamped like the wheel/pinch (10..48).
+    let zf = 0;
+    if (this.keys.has(b.zoomIn)) zf += 1;
+    if (this.keys.has(b.zoomOut)) zf -= 1;
+    if (zf !== 0) {
+      const before = r.screenToWorld(this._cx, this._cy);
+      const factor = zf > 0 ? 1 + 1.8 * dt : 1 - 1.8 * dt;
+      r.cam.zoom = Math.max(10, Math.min(48, r.cam.zoom * factor));
+      const after = r.screenToWorld(this._cx, this._cy);
+      r.cam.x += before.x - after.x; r.cam.y += before.y - after.y;
+    }
     const m = 3;
     this._cx = Math.max(r.vx + m, Math.min(r.vx + r.W - m, this._cx));
     this._cy = Math.max(r.vy + m, Math.min(r.vy + r.H - m, this._cy));

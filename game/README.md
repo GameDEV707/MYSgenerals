@@ -64,6 +64,7 @@ Needs the TypeScript compiler (`npm install -g typescript`).
 | Factory upgrades | Select a Barracks / War Factory → **Production Bay** (build 2–3 at once) / **Assembly Speed** (+25% / +50%) |
 | Research | Select the Research Center → start a global upgrade (needs a built Research Center) |
 | Keyboard build (P1) | In keyboard control, `1`–`0` activate the command-panel buttons; with a builder selected, **`Space`** moves across the build categories and **`E`** opens the highlighted one (`]` / `[` also cycle directly). The switch key is remappable in Settings → Keyboard |
+| Keyboard zoom (P1) | In keyboard control, **`Shift`** zooms in and **`Ctrl`** zooms out (remappable in Settings → Keyboard). The mouse player uses the wheel |
 | Minimap | Click to jump |
 | Pause | `☰` button (top-right) |
 
@@ -108,6 +109,16 @@ overlap: the rank/level pip, the HP bar, and a **single** secondary bar (constru
 (selected, hovered, recently hit, damaged, or for your hero), keeping the battlefield uncluttered, and
 persistent hero status (HP, level, ability cooldowns) lives in the fixed hero HUD cluster rather than
 floating over the map — a clean, Generals/Dota-style readout.
+
+The **hero ability cluster** (level, HP/mana, abilities) appears **only when the hero is selected**, docked
+tidily in the command area so it never overlaps the command buttons.
+
+## Power
+
+Each power-consuming building needs spare generation. When power usage reaches **90%** a **LOW POWER**
+warning appears (a full deficit turns it red and slows production), and trying to build a power-hungry
+structure with no headroom is refused with a "not enough power" message — build a **Power Plant** first.
+Power producers are never blocked.
 
 ## Multiplayer (LAN)
 
@@ -190,5 +201,8 @@ NODE_OPTIONS="" node test/visuals.mjs      # T26: unitShape() — 11 distinct un
 NODE_OPTIONS="" node test/keyboard.mjs     # T26: digit → command-panel activation, no control-group clash
 NODE_OPTIONS="" node test/catnav.mjs       # T27: Space→E keyboard build-category navigation
 NODE_OPTIONS="" node test/overlay.mjs      # T27: entityOverlayLayout() — non-overlapping status overlays
+NODE_OPTIONS="" node test/power.mjs        # T28: power gate (reject under-power build) + powerStatus thresholds
+NODE_OPTIONS="" node test/zoom.mjs         # T28: Player-1 keyboard zoom (Shift/Ctrl) within bounds
+NODE_OPTIONS="" node test/heropanel.mjs    # T28: hero ability panel visible only when hero selected
 ```
 

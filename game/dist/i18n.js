@@ -190,6 +190,7 @@ const en = {
     "errors.invalidPlacement": "Cannot build here",
     "errors.needBuilding": "Requires {b}",
     "errors.needFactoryTech": "Requires Factory Tech (Research Center)",
+    "errors.needPower": "Not enough power — build a Power Plant",
     "upgrade.bay": "Production Bay",
     "upgrade.speed": "Assembly Speed",
     "upgrade.maxed": "Max level reached",
@@ -215,6 +216,8 @@ const en = {
     "key.nextTab": "Next build tab",
     "key.prevTab": "Previous build tab",
     "key.cycleCategory": "Move build category (focus)",
+    "key.zoomIn": "Zoom in",
+    "key.zoomOut": "Zoom out",
     "toast.unitReady": "Unit ready",
     "toast.unitReadyNamed": "{unit} ready",
     "toast.queueFull": "Production queue full",
@@ -235,7 +238,7 @@ const en = {
         "• Economy chain: Silver → Iron → Gold → Power.\n" +
         "• Hero abilities: Q W E R. The hero levels up by fighting.\n" +
         "• Capture Oil Derricks for extra income.\n" +
-        "• Camera: WASD / edge-scroll / drag. Zoom: mouse wheel.",
+        "• Camera: WASD / edge-scroll / drag. Zoom: mouse wheel (keyboard player: Shift / Ctrl).",
     "stats.unitsBuilt": "Units built",
     "stats.unitsLost": "Units lost",
     "stats.buildingsDestroyed": "Buildings destroyed",
@@ -433,6 +436,7 @@ const ru = {
     "errors.invalidPlacement": "Здесь нельзя строить",
     "errors.needBuilding": "Требуется: {b}",
     "errors.needFactoryTech": "Требуется Заводская технология (Исследовательский центр)",
+    "errors.needPower": "Недостаточно энергии — постройте электростанцию",
     "upgrade.bay": "Производственный отсек",
     "upgrade.speed": "Скорость сборки",
     "upgrade.maxed": "Достигнут максимум",
@@ -458,6 +462,8 @@ const ru = {
     "key.nextTab": "Следующая вкладка постройки",
     "key.prevTab": "Предыдущая вкладка постройки",
     "key.cycleCategory": "Переместить категорию (фокус)",
+    "key.zoomIn": "Приблизить",
+    "key.zoomOut": "Отдалить",
     "toast.unitReady": "Юнит готов",
     "toast.unitReadyNamed": "{unit} готов",
     "toast.queueFull": "Очередь производства заполнена",
@@ -478,7 +484,7 @@ const ru = {
         "• Цепочка экономики: Серебро → Железо → Золото → Энергия.\n" +
         "• Способности героя: Q W E R. Герой растёт в бою.\n" +
         "• Захватывайте Нефтяные вышки ради дохода.\n" +
-        "• Камера: WASD / край экрана / перетаскивание. Зум: колесо мыши.",
+        "• Камера: WASD / край экрана / перетаскивание. Зум: колесо мыши (игрок с клавиатурой: Shift / Ctrl).",
     "stats.unitsBuilt": "Создано юнитов",
     "stats.unitsLost": "Потеряно юнитов",
     "stats.buildingsDestroyed": "Уничтожено зданий",
@@ -676,6 +682,7 @@ const uz = {
     "errors.invalidPlacement": "Bu yerga qurib boʻlmaydi",
     "errors.needBuilding": "Kerak: {b}",
     "errors.needFactoryTech": "Zavod texnologiyasi kerak (Tadqiqot markazi)",
+    "errors.needPower": "Energiya yetarli emas — elektr stansiya quring",
     "upgrade.bay": "Ishlab chiqarish boʻlimi",
     "upgrade.speed": "Yigʻish tezligi",
     "upgrade.maxed": "Maksimal daraja",
@@ -701,6 +708,8 @@ const uz = {
     "key.nextTab": "Keyingi qurish boʻlimi",
     "key.prevTab": "Oldingi qurish boʻlimi",
     "key.cycleCategory": "Qurish boʻlimini surish (fokus)",
+    "key.zoomIn": "Yaqinlashtirish",
+    "key.zoomOut": "Uzoqlashtirish",
     "toast.unitReady": "Birlik tayyor",
     "toast.unitReadyNamed": "{unit} tayyor",
     "toast.queueFull": "Ishlab chiqarish navbati toʻla",
@@ -721,7 +730,7 @@ const uz = {
         "• Iqtisod zanjiri: Kumush → Temir → Oltin → Energiya.\n" +
         "• Qahramon qobiliyatlari: Q W E R. Qahramon jangda oʻsadi.\n" +
         "• Daromad uchun Neft minoralarini egallang.\n" +
-        "• Kamera: WASD / ekran cheti / sudrash. Masshtab: sichqoncha gʻildiragi.",
+        "• Kamera: WASD / ekran cheti / sudrash. Masshtab: sichqoncha gʻildiragi (klaviatura oʻyinchisi: Shift / Ctrl).",
     "stats.unitsBuilt": "Yaratilgan birliklar",
     "stats.unitsLost": "Yoʻqotilgan birliklar",
     "stats.buildingsDestroyed": "Vayron qilingan binolar",

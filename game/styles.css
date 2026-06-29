@@ -82,6 +82,7 @@ select, input {
 .hud-root.split-right .cmdpanel { left: auto; right: 10px; }
 .hud-root.split-right .selinfo { left: auto; right: 340px; }
 .hud-root.split-right .minimap-wrap { right: auto; left: 10px; }
+.hud-root.split-right .herobar { left: auto; right: 10px; }
 
 /* HUD customization (edit mode): per-widget drag/resize/hide overlays (spec §24 → T23) */
 .hud-root.editing .hud-widget { outline: 1px dashed rgba(56,189,248,0.7); outline-offset: 2px; }
@@ -130,14 +131,17 @@ select, input {
 .power .bar { width: 80px; height: 10px; border-radius: 5px; background: #1a2430; overflow: hidden; border: 1px solid var(--border); }
 .power .fill { height: 100%; background: var(--power-ok); transition: width .25s, background .25s; }
 .power.deficit .fill { background: var(--power-bad); }
+.power.low .fill { background: #ffb020; }
 .timer { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .topbar .btn { padding: 6px 12px; font-size: 13px; }
 
 .lowpower-banner {
   position: absolute; top: 52px; left: 50%; transform: translateX(-50%);
-  background: rgba(239,68,68,0.92); color: #fff; padding: 4px 16px; border-radius: 4px;
-  font-weight: 700; letter-spacing: 1px; animation: pulse 1s infinite;
+  background: rgba(255,176,32,0.95); color: #1a1205; padding: 4px 16px; border-radius: 4px;
+  font-weight: 700; letter-spacing: 1px;
 }
+/* T28 Part B: a full deficit (brownout) is the stronger, pulsing red state. */
+.lowpower-banner.critical { background: rgba(239,68,68,0.92); color: #fff; animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
 .minimap-wrap {
@@ -236,7 +240,7 @@ select, input {
 .chev { color: var(--gold); letter-spacing: 2px; }
 
 .herobar {
-  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+  position: absolute; left: 10px; bottom: 142px;
   display: flex; gap: 8px; align-items: flex-end;
 }
 .hero-portrait {

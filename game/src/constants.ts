@@ -48,6 +48,17 @@ export const RESEARCH_DAMAGE_PER_LEVEL = 0.15; // Weapons: +15% outgoing damage 
 export const RESEARCH_ARMOR_PER_LEVEL = 0.15;  // Armor: +15% effective HP / level (incoming /1.15)
 export const LOGISTICS_BUILD_MULT = 0.8;       // Logistics: -20% unit build time
 
+// ---- T28: power status thresholds (pure; shared by the HUD warning + tests) ----
+export const LOW_POWER_RATIO = 0.9; // usage ≥ 90% of generation → "low power" warning
+export type PowerStatus = "ok" | "low" | "deficit";
+// Classify a player's power: "deficit" when usage exceeds generation (brownout / production slow),
+// "low" once usage reaches 90% of generation (warning), otherwise "ok".
+export function powerStatus(gen: number, use: number): PowerStatus {
+  if (use > gen) return "deficit";
+  if (gen > 0 ? use >= LOW_POWER_RATIO * gen : use > 0) return "low";
+  return "ok";
+}
+
 // Hero (§9 / §26.1)
 export const HERO_MAX_LEVEL = 10;
 export const HERO_RESPAWN_BASE = 8; // 8 s + 4 s * level

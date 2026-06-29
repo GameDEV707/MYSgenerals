@@ -343,6 +343,20 @@ export class World {
     if (!this.placementValid(cmd.owner, cmd.building, cmd.x, cmd.y)) {
       this.events.push({ e: "toast", key: "errors.invalidPlacement", kind: "danger", to: cmd.owner }); return;
     }
+    // T28 Part B: power gate — a power-CONSUMING building cannot be started without spare
+    // generation. Count current usage + the demand of this owner's already-in-progress consumers,
+    // so you cannot queue several builds that would collectively exceed supply. Power PRODUCERS
+    // (power_plant, command_center) have def.power >= 0 and are never blocked.
+    const demand = def.power < 0 ? -def.power : 0;
+    if (demand > 0) {
+      let committed = p.powerUse;
+      for (const e of this.entities) {
+        if (!e.dead && e.kind === "building" && e.owner === cmd.owner && e.constructing && e.power < 0) committed += -e.power;
+      }
+      if (committed + demand > p.powerGen) {
+        this.events.push({ e: "toast", key: "errors.needPower", kind: "danger", to: cmd.owner }); return;
+      }
+    }
     this.pay(p, def.cost);
     const b = this.spawn("building", cmd.building, cmd.owner, cmd.x, cmd.y);
     b.constructing = true; b.buildTotal = def.buildTime; b.buildProgress = 0; b.hp = Math.max(1, def.hp * 0.1);

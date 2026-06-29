@@ -917,3 +917,92 @@ pass: the prior fifteen plus the two new T27 suites — `catnav` and `overlay`.
 super-ability today is the hero ultimate, whose cooldown already lives in the fixed `herobar` cluster, so
 no redundant floating strip was added; and an elaborate world-space status-icon row (brownout remains a
 building tint). No required T27 scope item is dropped.
+
+
+
+---
+
+## T28 — Hero panel on-select, power gating & low-power warning, keyboard zoom, tidy hero/level HUD cluster  *(HUD + economy fixes)*
+
+> Source of truth: `../MYSgenerals.md` §24 → T28. **UI/UX + one authoritative economy rule.** The
+> power **gate** is a sim check inside `tryBuild` (so it holds identically in single-player,
+> split-screen and LAN); everything else is client HUD/input. Netcode and the T23/T24 split-screen
+> routing are unchanged (only the new keyboard bindings + the build-time power check were added).
+
+**Goal (restated):** four reported fixes — (1) the hero's "super" ability bar must appear **only when
+the hero is selected** (it was always on); (2) the **power economy must be honest** — a "LOW POWER"
+warning at **≥ 90 %** usage, and **reject** a power-consuming build when there is no spare generation
+instead of silently building it; (3) **Player 1 (keyboard)** can **zoom in/out** (default `Shift` /
+`Ctrl`, remappable); (4) the `★ Lvl` badge must **no longer overlap** the command-panel buttons — when
+the hero is selected its level + abilities sit **neatly in the command area**, for **all players**.
+
+### Scope checklist (T28)
+- [x] The hero's ability ("super") panel is shown **only when the hero is selected** (or while editing
+      the HUD layout); hidden with `display:none` (no layout footprint) otherwise; still updates live.
+- [x] A **"LOW POWER"** warning appears once power usage **≥ 90 %** of generation; a full deficit
+      (`use > gen`) is a distinct, stronger "critical" state with the existing brownout slow-down.
+- [x] Building a **power-consuming** structure with **insufficient power** is **rejected** with an
+      `errors.needPower` toast (authoritative, in `tryBuild`) — not constructed, not charged; power
+      **producers** (power plant / command center) are never blocked; in-progress consumers count.
+- [x] **Player 1 (keyboard)** can **zoom in/out**; defaults **`Shift`** (in) / **`Ctrl`** (out),
+      **remappable** in Settings (conflict-checked, persisted, trilingual), clamped to the 10–48 bounds.
+- [x] The **`★ Lvl` badge no longer overlaps** the command panel (the hero cluster is docked in the
+      command area, only on hero-select); the on-map hero level pip is unchanged; same for all players
+      (single, split P1 left / P2 right, LAN), split-screen-safe.
+- [x] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography U+02BB/U+02BC);
+      `localeParity()` passes.
+- [x] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen
+      (T24) and LAN (T25) regress cleanly.
+
+### Implementation summary
+- **`src/constants.ts`:** pure `powerStatus(gen, use)` → `"ok" | "low" | "deficit"` (`LOW_POWER_RATIO =
+  0.9`), shared by the HUD warning and the test.
+- **`src/sim/world.ts` (`tryBuild`):** after cost/prereq/placement, a **power gate** — a consumer's
+  demand is `-def.power` (producers have `def.power ≥ 0`); the build is rejected with an
+  `errors.needPower` toast (no `pay`, no `spawn`) when `powerUse + (in-progress consumers) + demand >
+  powerGen`. Producers and power-neutral buildings are never blocked.
+- **`src/ui/hud.ts`:** `update()` now derives the power state from `powerStatus()` — the **LOW POWER**
+  banner shows for `low` **and** `deficit`, with a `.critical` class (and the power meter gets `.low` /
+  `.deficit`). Added the exported pure **`heroPanelShouldShow(heroId, selection, editing)`**;
+  `updateHeroBar()` sets the herobar to `display:none` unless the hero is selected (or the layout is
+  being edited), so the hero cluster only appears on selection.
+- **`src/ui/keyBindings.ts`:** new **p1** bindings `zoomIn` (`shift`) / `zoomOut` (`control`) with
+  `ACTION_DEFS` entries (conflict-checked, persisted, resettable, trilingual labels).
+- **`src/input.ts` (`updateVirtualCursor`):** the keyboard player zooms `cam.zoom` about the cursor
+  while the bound zoom key is held, clamped to `10..48` (same bounds as the wheel/pinch), re-clamping
+  the camera.
+- **`styles.css`:** the `.herobar` is re-anchored to the bottom-left command area (`left:10; bottom:142`,
+  was centered `left:50%`) with a `.hud-root.split-right .herobar { right:10 }` rule for Player 2; the
+  low-power banner is amber by default with a pulsing-red `.critical` state, and the power meter gains a
+  `.low` (amber) fill.
+- **`src/i18n.ts`:** `errors.needPower`, `key.zoomIn`, `key.zoomOut` in en/ru/uz (Uzbek with U+02BB),
+  and the controls help mentions the keyboard `Shift`/`Ctrl` zoom.
+
+### How each DoD line was verified
+**Quality gate.** `bash build.sh` compiles client + server with **zero TS errors**. **Twenty** suites
+pass: the prior seventeen plus the three new T28 suites — `power`, `zoom`, `heropanel`.
+
+- **Power gate + thresholds.** `test/power.mjs` proves `powerStatus()` classifies 80 % → `ok`, 90 % →
+  `low`, over-budget → `deficit`; that a power-consuming `silver_mine` at `9/9` is **rejected** (no
+  entity created, player **not charged**, `errors.needPower` emitted); that the same build at `10/9`
+  **succeeds and is charged**; that a **power plant** builds even at a `5/20` deficit; and that an
+  **in-progress consumer counts** so you cannot queue several builds over budget.
+- **Keyboard zoom.** `test/zoom.mjs` holds the default `Shift` to raise `cam.zoom` and `Ctrl` to lower
+  it on a `p1-keyboard` controller, confirms the **10–48 clamp**, and that zoom is steady with no key
+  held. `test/keybindings.mjs` asserts the `zoomIn`/`zoomOut` defaults (`shift`/`control`) and their
+  per-context conflict detection.
+- **Hero-panel visibility.** `test/heropanel.mjs` checks `heroPanelShouldShow()`: hidden with an empty
+  or other-unit selection, shown when the hero is in the selection, hidden for `heroId 0`
+  (dead/respawning), and always shown while editing the HUD.
+- **Trilingual + parity.** `localeParity()` (in `test/smoke.mjs`) passes with the new keys present in
+  uz/ru/en.
+- **No regression.** The sim/netcode/split-screen routing are untouched apart from the additive power
+  check and bindings; `smoke, net, host, lobby, input, hudlayout, stress, split, keybindings, kbinput,
+  lan, production, research, visuals, keyboard, catnav, overlay` all stay green.
+
+**[OPT] deferred:** the hero cluster is **re-anchored** into the command area (no overlap, only on
+select) rather than re-parented as literal child markup of the command-panel `<div>` — this keeps the
+existing ability click/cooldown wiring intact while satisfying the "tidy, in the command area, no
+overlap, all players" requirement. A separate global-powers/super-weapon countdown strip remains [OPT]
+(the only persistent super is the hero ultimate, whose cooldown lives in the hero cluster). No required
+T28 scope item is dropped.

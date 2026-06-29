@@ -1089,7 +1089,7 @@ Single-player needs a competent AI so the game is fun solo. The AI runs **on the
 
 ---
 
-## 24. BUILD TASK PLAN (T0 – T29)
+## 24. BUILD TASK PLAN (T0 – T30)
 
 Tasks are **ordered**. Each has a **Goal**, a **Scope checklist** (every box must be checked), and a **Definition of Done (DoD)**. A task ships only when all boxes are checked and all DoD lines pass. Tasks reference the design sections above for exact numbers and behaviors. Every animation/VFX listed in §16 for a feature is part of that feature's task — "functional but no animation" is **not** done.
 
@@ -1863,6 +1863,89 @@ DoD: in a match, the **hero ability panel is hidden** until the hero is selected
 - [ ] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24) and LAN (T25) regress cleanly.
 
 DoD: when the player picks a building to place, the **command / selection / hero panels disappear** so the **battlefield is fully visible** for positioning, with a clear **Cancel-build** button (plus Esc / right-click) to back out — and the panels return the moment placement ends. Selecting one of the player's **mines** shows a **countdown to the next `+1`** of its resource (idle silver mines prompt to assign miners). On the map and in the build menu, the **Gold Mine reads gold, the Silver Mine silver, the Iron Mine iron** at a glance. Verifiable headlessly: the mine-ETA helper, the placement-visibility predicate + cancel-clears-placing, all pass; `bash build.sh` is clean and every suite is green; all UI reads correctly in uz/ru/en.
+
+---
+
+### T30 — Command Center leveling & tech-gated build tree, upgradeable defenses with range display, and worked-mine economy  *(base progression + economy depth)*
+
+**Goal:** make the base itself **progress**, gate the build tree behind that progress, give the defensive towers **upgrade depth with a visible range**, and make every **mine require a miner working inside it**. Concretely: (1) the **Command Center (CC) is upgradeable** to **Level 2** and **Level 3**; its level **unlocks the build tree** — the **Barracks** ("askar chiqargich") becomes buildable at **CC L2** (resources permitting), and the **War Factory** ("tank ishlab chiqargich") only at **CC L3**; the defensive line unlocks in step — **Guard Tower at L1, Cannon Tower at L2, Rocket (missile) Tower at L3**. (2) Selecting a **defensive building** draws **the radius in which it sees / shoots**, and defenses are **upgradeable to max Level 3**, where **each level raises the range and the damage**; an **upgrade takes half the build time** of the building. (3) Every **mine** now needs a **miner working inside it** — a mine with no miner produces **nothing**; the player **trains a miner at the CC for 5 silver**, and that miner **automatically walks to a free mine, enters it, and works** — and the long-standing bug where the trained miner just **stands next to the mine** is fixed: on arrival the miner **goes inside the mine and is no longer visible on the map**.
+
+**Why this task (current behavior, with file references):**
+- **The base never levels up; the build tree is flat.** `data.ts BUILDING_DEFS.command_center` has no level concept, and `sim/world.ts tryBuild()` only gates by a single `def.requires` (today just `war_factory.requires = "barracks"`). Everything except the War Factory is buildable from minute one, so there is no base-progression pressure and no reason to defend/grow the CC.
+- **Defenses are one-shot and their reach is invisible.** `guard_tower` / `cannon_tower` / `rocket_tower` (`data.ts`) have fixed `weapon.range` / `weapon.damage` and no upgrade path; only producing buildings can be upgraded today (`world.ts tryUpgradeBuilding()` early-returns unless `def.produces`). When a tower is selected (`ui/hud.ts updateSelInfo`, `render/renderer.ts drawSelection`) the player sees only its HP — not how far it can see or shoot — so placement is guesswork.
+- **Iron/Gold/Oil mines mine themselves; only silver needs workers.** `world.ts economySystem()` adds resources to `iron_mine` / `gold_mine` / captured `oil_derrick` **unconditionally** (just `resAccum += TICK_DT / INTERVAL`); only `silver_mine` checks `minerSlots`. So a built iron/gold mine earns income with **no miner**, which contradicts the intended "staff your mines" economy.
+- **The trained miner stands beside the mine instead of entering it.** `world.ts workerSystem()` sets `e.mining = true` once the miner is within `mine.radius + 1.2`, but the miner **entity stays on the map** (drawn by `render/renderer.ts`, selectable, collidable). `autoAssignMiner()` only ever targets **silver** mines. The reported bug is exactly this: "the miner just stands next to the mine" — it should disappear **into** the mine.
+
+> Scope note: unlike the UI-only T29, this task **does extend the authoritative simulation** (§3.2) — new sim rules (CC level, mine occupancy) and new/extended `Command`s (building upgrades for the CC and defenses). **But every new action still flows through the `Command` union → host → `MatchHost`**, so it behaves identically in single-player, split-screen (T24) and LAN (T25). The **netcode transport, the fog-filtered snapshot model, and the T23/T24 split-screen input routing / per-side HUD are unchanged.** All numbers below are **starting balance, tunable in T21** (they do not touch the §0 canonical economy numbers — a manned silver/iron/gold mine still earns at today's canonical rate; the only economic change is that an **unmanned** mine now earns nothing).
+
+---
+
+#### Part A — Command Center leveling & a tech-gated build tree
+
+**A1. CC is upgradeable (L1 → L2 → L3).** The Command Center starts at **Level 1** and can be upgraded to **L2** then **L3**. Reuse the T26 upgrade path (`world.ts tryUpgradeBuilding()` + the `upgradeBuilding` `Command`): add a new upgrade `kind` (e.g. `"level"`) — or a dedicated `upgradeLevel` command — that increments the CC's level, after a **paid cost** and a **timed** upgrade (see A4). While upgrading, the CC shows a progress bar (like construction/research) and **cannot upgrade again** until it finishes. Add a `level` field to the building `Entity` (default 1). Starting balance (tunable in T21): **L1→L2** `{ silver: 80, iron: 15 }`, **L2→L3** `{ gold: 2, silver: 150, iron: 30 }`.
+
+**A2. The CC level gates the build tree.** `tryBuild()` (authoritative) rejects a build whose **required base level** exceeds the owner's **highest CC level**, with a clear toast (`errors.needBaseLevel`, params: required level). Define the requirement per building via a new field on `BuildingDef` (e.g. `requiresBaseLevel?: number`, default 1) or a small `BUILD_TREE` table:
+
+| Building | Min CC level |
+|---|---|
+| Silver / Iron / Gold Mine, Power Plant, **Guard Tower**, Research Center, Wall | **1** |
+| **Barracks**, **Cannon Tower** | **2** |
+| **War Factory**, **Rocket Tower** | **3** |
+
+(The War Factory's existing `requires: "barracks"` prerequisite is naturally satisfied at L3 and may be kept or folded into the level gate.) Mines/power/defense-L1 stay buildable from the start so the player can bootstrap economy and a first defense.
+
+**A3. Build menu reflects the gate.** `ui/hud.ts buildBtn()` shows locked buildings **greyed / disabled** with a tooltip naming the required base level (e.g. "Requires Command Center Lvl 2"), and unlocks them live the instant the CC reaches that level. The CC's own panel gains an **Upgrade to Lvl N** button (disabled at max level or while already upgrading), mirroring the T26 factory-upgrade button.
+
+**A4. Upgrade timing & feedback.** The CC upgrade is **timed**, taking **half the time a comparable build would** (the general T30 rule, see B3) — define explicit CC upgrade times as starting balance (e.g. **L1→L2 = 20 s**, **L2→L3 = 30 s**, tunable in T21). On completion, fire the existing `rankup` / level-up VFX + a toast, and the CC's on-map **level pip** updates.
+
+#### Part B — Upgradeable defenses with an on-select range display
+
+**B1. Show the radius on selection.** When a defensive building (`guard_tower`, `cannon_tower`, `rocket_tower`) is selected, the renderer draws its **attack range** (a ring at `weapon.range`) and, more faintly, its **vision** ring (`def.vision`), centred on the tile — so the player can see exactly **how far it sees and shoots**. Keep it consistent with the T27 overlay system (no clutter; only while selected). The selection panel (`updateSelInfo`) also prints the numeric **range** and **damage**.
+
+**B2. Defenses are upgradeable (max Level 3).** Extend the upgrade system so defensive buildings (which have a `weapon` but no `produces`) can be upgraded along a **level** track **1 → 2 → 3**. Add the upgrade button to their command panel. Each upgrade is paid (starting balance: per level ≈ **75 % of the building's base cost**, tunable in T21).
+
+**B3. Each level boosts range + damage (and the upgrade is fast).** Every level adds to the tower's effective **`weapon.range`** and **`weapon.damage`** (starting balance: **+1 tile range and +25 % damage per level**, tunable in T21; optionally a small +HP). The **range ring from B1 grows accordingly**. **An upgrade takes half the build time** — the canonical T30 rule: **upgrade time = ⌈ building `buildTime` ÷ 2 ⌉** (so a Guard Tower's 15 s build → ~8 s upgrade). While upgrading, the tower shows a progress bar and keeps fighting at its current level; the new level applies on completion. The on-map **level pip** shows the current tower level (1–3).
+
+**B4. Authoritative + net-safe.** All defense upgrades are validated host-side in the upgrade handler (level cap, affordability, not-already-upgrading) and flow through the `Command` union, so towers upgrade identically in SP / split / LAN; the per-tower level rides the **own-entity** snapshot fields (like the existing queue/research data), and the effective range/damage used by `combatSystem()` is derived from the tower's level.
+
+#### Part C — Worked-mine economy (every mine needs a miner; miners enter the mine)
+
+**C1. No miner → no output, for *every* mine.** Generalize `economySystem()` so **silver, iron, gold and captured oil** mines only produce while **at least one miner is working inside** them. Preserve canon: a **silver** mine scales with its miners up to its slot cap (`SILVER_MINE_SLOTS`, today's behavior); **iron / gold / oil** produce at their fixed canonical interval (`IRON_INTERVAL` / `GOLD_INTERVAL` / `OIL_INTERVAL`) **when occupied by ≥ 1 miner, and nothing when empty**. Track occupancy per mine via the existing `minerSlots` (extended to all mine types).
+
+**C2. Train at the CC; auto-route to a free mine; enter and work.** The CC trains a **miner for 5 silver** (already `units.miner.cost = { silver: 5 }`). On spawn (and whenever a miner goes idle), `autoAssignMiner()` is generalized to send it to the **nearest owned, fully-built mine of *any* type with a free work slot** (not just silver). On arrival the miner **enters the mine**: it is **removed from the battlefield** — **not drawn, not selectable, not collidable, not targetable** — and counts toward that mine's occupancy so the mine starts producing. Add an `Entity` flag (e.g. `inMine: true` / a `garrisonedIn` mine id) that `render/renderer.ts`, the selection/picking code, the movement/collision pass and `combatSystem()` all skip.
+
+**C3. Fix the "stands beside the mine" bug.** This is the concrete fix for C2: today `workerSystem()` leaves the miner standing at `mine.radius + 1.2`; instead, on reaching the mine the miner transitions to **inside** (hidden) and the mine's `minerSlots` increments. The miner no longer renders on the map while working.
+
+**C4. Releasing miners.** If a mine is **destroyed** (or sold), its **occupant miners are ejected** back onto the map next to the rubble as **idle** units (visible/selectable again) and are **auto-reassigned** to the next free mine via `autoAssignMiner()` — so workers are not silently lost. (If no free mine exists, they idle on the map.)
+
+**C5. Countdown reflects occupancy (ties into T29).** The T29 mine-ETA readout (`constants.ts mineEta()` + the selection-panel countdown + the on-map ring) now reflects **per-mine miner occupancy for all mine types**: an **unmanned** mine of any type reports **idle** with the "assign miners" hint; a manned mine counts down to its next `+1`. (Extend `mineEta()` so iron/gold/oil also return idle when occupancy is 0.)
+
+---
+
+#### Cross-cutting
+
+**i18n.** Add every new user-facing string in **uz/ru/en** with correct Uzbek orthography (U+02BB `ʻ`, U+02BC `ʼ`): the CC **Upgrade to Lvl N** label, the **base-level lock** tooltip/toast (`errors.needBaseLevel`), the defense **Upgrade** label and the tower **range / damage / level** labels, and any "mine idle / assign miners" wording reused from T29. `localeParity()` must stay green; no hard-coded strings.
+
+**Tests (headless, dependency-free, in `test/`).** Add/extend suites and keep all existing green:
+- **base-tech gating** (pure): a building's required base level vs. the owner's CC level decides buildability — Barracks/Cannon need L2, War Factory/Rocket need L3, mines/power/Guard Tower available at L1; `tryBuild` rejects an under-level build (toast) and accepts it once the CC is high enough.
+- **CC + defense upgrades**: the upgrade is rejected past **L3**, costs are paid, the **upgrade time is half the build time** (defenses) / the defined CC times, and a defense's **effective range and damage rise per level**.
+- **worked-mine economy**: an **unmanned** mine of each type produces **nothing**; a mine with a miner inside produces at the canonical rate; a miner that reaches a mine becomes **inside / hidden** (occupancy +1, not on the map); destroying a mine **releases** its miners as idle.
+- **mine-ETA (extend T29)**: iron/gold/oil report **idle** with 0 occupancy and count down when occupied.
+
+**Docs.** On implementation, add a **T30 section to `PROGRESS.md`** in the T26–T29 style (Scope checklist, "How each DoD line was verified", "[OPT] deferred"), and update `README.md` (Command Center leveling + tech-gated build tree; upgradeable defenses with a visible range; every mine needs a miner who enters the mine; train miners at the CC for 5 silver that auto-staff mines).
+
+### Scope checklist (T30)
+- [ ] The **Command Center is upgradeable** to **L2** and **L3** (paid + **timed**, half-build-time rule), with a progress bar, a level pip, and an **Upgrade** button (disabled at max / while upgrading).
+- [ ] The **CC level gates the build tree**: Barracks + Cannon Tower require **L2**, War Factory + Rocket Tower require **L3**; mines / power / **Guard Tower** are available at **L1**. `tryBuild` enforces it authoritatively; `buildBtn()` greys locked items with a "requires Lvl N" hint and unlocks them live.
+- [ ] Selecting a **defensive building** draws its **attack range** (and vision) ring and prints range/damage; defenses are **upgradeable to max L3**, where **each level raises range + damage** and the ring grows.
+- [ ] A defense/CC **upgrade takes half the build time** of the building (`⌈buildTime ÷ 2⌉`, with explicit CC times).
+- [ ] **Every mine** (silver/iron/gold/captured oil) **produces only while a miner works inside**; an unmanned mine earns **nothing** and reports **idle** (T29 readout extended).
+- [ ] A miner trained at the CC (**5 silver**) **auto-routes to the nearest free mine of any type, enters it, and is no longer drawn / selectable / targetable on the map** (the "stands beside the mine" bug is fixed); a destroyed mine **releases** its miners as idle.
+- [ ] All new actions flow through the **`Command` union → host → `MatchHost`** (authoritative); single-player, split-screen (T24) and LAN (T25) behave identically and regress cleanly.
+- [ ] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography); `localeParity()` passes.
+- [ ] New + existing **headless tests pass**; `bash build.sh` is clean.
+
+DoD: the **Command Center can be upgraded to Level 2 and 3** (each costing resources and time, the upgrade taking **half** a comparable build); its level **unlocks buildings** — **Barracks at L2, War Factory at L3**, with the **Guard / Cannon / Rocket** towers unlocking at **L1 / L2 / L3** — and locked buildings are visibly gated with a clear reason until the base levels up. **Defensive towers can be upgraded up to Level 3**, and selecting one **shows the radius it sees and fires in**, which **grows** (along with its damage) at each level. **No mine produces without a miner inside it**: the player **trains a miner at the base for 5 silver**, the miner **walks to a free mine and disappears into it** (it no longer loiters beside the mine), and the mine then earns at the canonical rate; an empty mine sits **idle** and prompts for miners. Everything is **host-authoritative** and works in single-player, split-screen (T24) and LAN (T25). Verifiable headlessly: the base-tech-gating, CC/defense-upgrade, worked-mine-economy and extended mine-ETA suites all pass; `bash build.sh` is clean and every suite is green; all UI reads correctly in uz/ru/en.
 
 ---
 

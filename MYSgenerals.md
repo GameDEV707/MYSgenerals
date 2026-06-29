@@ -1089,7 +1089,7 @@ Single-player needs a competent AI so the game is fun solo. The AI runs **on the
 
 ---
 
-## 24. BUILD TASK PLAN (T0 – T26)
+## 24. BUILD TASK PLAN (T0 – T27)
 
 Tasks are **ordered**. Each has a **Goal**, a **Scope checklist** (every box must be checked), and a **Definition of Done (DoD)**. A task ships only when all boxes are checked and all DoD lines pass. Tasks reference the design sections above for exact numbers and behaviors. Every animation/VFX listed in §16 for a feature is part of that feature's task — "functional but no animation" is **not** done.
 
@@ -1672,6 +1672,75 @@ This makes the build menu fully operable from the keyboard and **resolves the "b
 - [ ] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24), and LAN (T25) regress cleanly.
 
 DoD: in a match, clicking a **Barracks** or **War Factory** shows the units it is building **in order**, each with a **progress ring and countdown**, and clicking a slot **cancels** it (with refund). The factory can be **upgraded** to build **2 then 3 units at once** and to build **faster**, with the **Research Center** running **timed researches** that **unlock those upgrades** and **buff the army** (more damage, more armor, faster builds) — selecting the Research Center shows these options instead of only a Sell button. On the battlefield **each unit type looks different** (tanks vs artillery vs rocket launcher vs anti-air; infantry vs rocket-soldier vs robot vs engineer vs miner). **Player 1 using only the keyboard** can build a factory and queue units by pressing **`1`–`0`** (with `Tab` to change build categories), so selecting the builder is no longer a dead-end. Verifiable headlessly: parallel-bay and speed math, research effects on damage/armor/build-time, `unitShape()` uniqueness, and the keyboard-number → panel-activation path all pass; `bash build.sh` is clean and every test suite is green; all UI reads correctly in uz/ru/en.
+
+---
+
+### T27 — Keyboard build-category navigation (Space+select) & tidy on-screen status indicators  *(Player-1 keyboard UX + clutter-free HUD overlays)*
+
+**Goal:** finish making **Player 1 fully playable on the keyboard** and make the battlefield **read cleanly like C&C Generals / Dota**. Two concrete fixes: (1) when Player 1 has a **builder selected** and the build menu is open, they can **switch between the category sections** (economy / military / defense / tech) entirely from the keyboard — **press the switch key (default `Space`) to move across the categories, then press the select key (`E`) to open the highlighted category** — and that switch key is **remappable in Settings**; (2) the **world-space status indicators** that currently float over units and buildings — **rank/level pips, hero & tower HP bars, and super-ability / super-weapon timers** — are **overlapping each other in a disorderly way and clutter the main view**, so they must be **arranged into a fixed, non-overlapping layout** (and persistent status moved into dedicated HUD zones) that **does not obstruct the battlefield**, as in Generals/Dota.
+
+**Why this task (current defects, with file references):**
+- **Keyboard category switching is undiscoverable / not working for the player.** T26 added `nextTab` / `prevTab` (defaults `]` / `[`) in `ui/keyBindings.ts` (p1 group) → `input.ts onKeyP1()` → `hud.ts cycleBuildTab()`. In practice a keyboard player who selects a miner sees the tabbed build menu but cannot intuitively change tabs — the reported bug: *"select the builder, then try to go to the **military** section and it will not switch."* So every building outside the default **economy** tab (barracks, war factory, defenses, tech) is effectively unreachable from the keyboard. The intended, discoverable flow is **`Space` to move a focus highlight across the category tabs, then `E` (the existing p1 `select`) to open the focused tab** — and the switch key must be **user-remappable**.
+- **On-screen indicators overlap and clutter the view.** In `render/renderer.ts` the world-space overlays are drawn at hard-coded, **colliding** offsets: `drawHpBar()` sits just above the entity, while the construction bar, the brownout marker, the T26 **production head-item bar** and the **research bar** are all drawn at `y - 7`, and the rank pip text at `y - r - 2`. When an entity is in several states at once (a low-HP factory that is also producing; a **hero** with HP **+ level + ability cooldowns + buff aura**; a **tower/defensive building** firing while damaged), these stack on top of one another and smear across the screen. Persistent status (hero HP/level/ability cooldowns, banner / super-ability timers) **floats over the battlefield** instead of living in a tidy HUD zone. The result is the "disordered indicators piling on top of each other" the player describes.
+
+> Scope note: this task is **UI/UX only**. It does **not** change the authoritative simulation (§3.2), the `Command` union, the netcode, or the T23/T24 split-screen input routing / per-side customizable HUD — it refines **input handling** (`input.ts`, `keyBindings.ts`, `hud.ts`) and **rendering/HUD layout** (`renderer.ts`, `ui/hud.ts`, `ui/hudLayout.ts`). It must regress cleanly in single-player, split-screen (T24) and LAN (T25).
+
+---
+
+#### Part A — Keyboard build-category navigation: `Space` to move, `E` to open (remappable)
+
+**A1. Category-focus mode.** While a **tabbed build panel** is open for a keyboard player (`p1-keyboard`, miner/engineer selected so the economy/military/defense/tech tabs show), pressing the new **`cycleCategory`** key (**default `Space`**) enters/advances **category-focus**: a focus highlight moves to the **next** tab each press, wrapping around. Focus only **previews** the tab (moves the highlight) — it does **not** yet change the buttons shown in the grid.
+
+**A2. Confirm with the select key.** Pressing the existing p1 **`select`** key (**`E`**) while a tab is focused **opens** that category — it becomes the **active build category**, its buildings populate the grid, and category-focus mode exits. The number keys `1`–`0` (T26 Part E) then build from the now-active category. `Esc` exits category-focus without changing the active tab. With **no** active focus, `E` keeps its current meaning (select the unit/building under the virtual cursor) — define the precedence explicitly so there is no ambiguity.
+
+**A3. Remappable switch key.** Add **`cycleCategory`** to the **p1** group of `ui/keyBindings.ts` with **default `Space`**, full **conflict detection** (within the p1 context), **localStorage persistence**, **reset-to-defaults**, and a **trilingual** action label in the **Settings → Keyboard** screen (per the T24 binding system). Keep the T26 `nextTab` / `prevTab` (`]` / `[`) as an optional **direct-cycle** shortcut, but the `Space`-focus-then-`E`-confirm flow is the **primary, documented** path.
+
+**A4. Visible focus cue.** The **focused** (not-yet-opened) tab shows a distinct **focus outline/glow** that is clearly different from the **active** tab style, so the player can see where the focus is before confirming. The existing T26 number badges (1–0) on the grid buttons remain when a keyboard player is active. Update the **Settings → Keyboard help text** to describe: *"Builder selected → `Space` moves across build categories, `E` opens the highlighted one."*
+
+**A5. Robustness / no regression.** Selecting a builder with the keyboard keeps the selection and opens the correct panel; the `Space`→`E` flow reaches **every** category and is followed by a working `1`–`0` build. In **single-player / mouse**, clicking a category tab still switches it (unchanged), and `Space`/`E` cause no control-group or selection regressions. Add a headless test for the focus→confirm→build path (Part Cross-cutting).
+
+---
+
+#### Part B — Tidy, non-overlapping on-screen status indicators (Generals/Dota-style)
+
+**B1. One ordered overlay stack per entity.** Replace the scattered hard-coded offsets in `renderer.ts` with a **single layout helper** (e.g. `entityOverlayLayout(entity, radius)`) that returns **fixed, non-overlapping vertical slots** so overlays never collide. Canonical order (top → bottom), each with consistent spacing:
+1. **rank / level pip** (veterancy chevrons / hero level) — a small fixed badge in a consistent corner;
+2. **HP bar** (unit / hero / tower) — one row;
+3. **one secondary bar slot** for the current state — **construction *or* production head-item *or* research** (these are mutually exclusive per entity) drawn in the **same** reserved row, never stacked on the HP bar;
+4. **status icons** (brownout, buff, etc.) — a small icon row.
+Centralize all offset math here; remove the colliding `y - 7` literals so a producing **and** low-HP **and** ranked building shows a clean, ordered stack.
+
+**B2. Show-only-when-relevant (declutter).** Adopt a single visibility rule like Generals/Dota: per-entity HP bars are shown for entities that are **selected, hovered, recently damaged, or below a HP threshold**, plus always for the **local player's hero** and key buildings — **not** permanently for every unit on the map. This keeps the battlefield clean while keeping important info available.
+
+**B3. Hero status → fixed HUD cluster.** Move the **hero's** persistent status (HP, **level / XP**, and **ability cooldowns**) out of the floating world-space overlays into a **dedicated HUD cluster** (hero portrait/status block with ability icons showing **cooldown sweeps** and remaining seconds), anchored per the **T23/T24 per-side customizable HUD** (so each split-screen player's hero status sits on their own side and never bleeds across the divider). Only a minimal HP bar + level pip remains over the hero on the map.
+
+**B4. Super-ability / super-weapon timers → dedicated corner.** Any **super abilities / super-weapon / global power timers** (hero ultimate, banner/global powers) render as a compact **corner indicator row** with countdowns and ready-flash — **not** floating over the casting unit — matching the Generals/Dota "global powers" strip.
+
+**B5. Split-screen & performance correctness.** All overlays clip to their **own viewport half** and use that player's HUD anchors (no cross-divider bleed); respect `reduceMotion` / quality settings; **no per-frame allocations** (reuse the existing `ctx.save/translate/rotate` pattern and the layout helper's returned values). Towers/defensive buildings use the same ordered overlay (HP + consistent level pip) as everything else.
+
+---
+
+#### Cross-cutting
+
+**i18n.** Add every new user-facing string in **uz/ru/en** with correct Uzbek orthography (U+02BB `ʻ`, U+02BC `ʼ`): the `cycleCategory` action label, the Settings keyboard help line for the `Space`→`E` flow, and any new ability / super-timer labels. `localeParity()` must stay green; no hard-coded strings.
+
+**Tests (headless, dependency-free, in `test/`).** Add/extend suites and keep all existing ones green:
+- **keyboard category nav**: in `p1-keyboard` with a miner selected, pressing `cycleCategory` (Space) advances the focused tab (wrapping) without changing the active tab; pressing `select` (E) opens the focused tab (active category changes) and exits focus; a subsequent `1`–`0` builds from the new category; `Esc` cancels focus; the binding is remappable + conflict-checked (extend `keybindings`/`kbinput`).
+- **overlay layout**: `entityOverlayLayout()` returns **non-overlapping** slots (HP bar, secondary bar, and pip occupy distinct, ordered offsets) for an entity in multiple simultaneous states; the secondary-bar slot is shared by construction/production/research (never doubled).
+
+**Docs.** On implementation, add a **T27 section to `PROGRESS.md`** in the T24/T25/T26 style (Scope checklist, "How each DoD line was verified", "[OPT] deferred"), and update `README.md` (keyboard build-category navigation: `Space` to move, `E` to open, remappable; and the tidied HUD/indicator layout).
+
+### Scope checklist (T27)
+- [ ] With a builder selected, a **keyboard** Player 1 can press the **switch key (default `Space`)** to move a **focus highlight** across the build categories and the **select key (`E`)** to **open** the highlighted category; `1`–`0` then build from it. The military/defense/tech sections are reachable — the "won't switch" dead-end is fixed.
+- [ ] The category **switch key is remappable** in Settings → Keyboard (default `Space`), with conflict detection, persistence, reset, and a **trilingual** label; the help text documents the `Space`→`E` flow.
+- [ ] World-space overlays (**rank/level pip, HP bar, construction/production/research bar, status icons**) are laid out by a **single ordered helper** with **fixed, non-overlapping** slots — no more colliding `y - 7` draws.
+- [ ] HP bars follow a **show-when-relevant** rule (selected/hovered/damaged/low-HP + local hero/key buildings), keeping the map uncluttered.
+- [ ] **Hero status** (HP, level/XP, ability cooldowns) and **super-ability / super-weapon timers** live in **dedicated, fixed HUD zones** (per-side, T23/T24-compatible), not floating over the battlefield.
+- [ ] Overlays clip to each split-screen half (no bleed), respect reduce-motion/quality, and add **no per-frame allocations**.
+- [ ] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography); `localeParity()` passes.
+- [ ] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24) and LAN (T25) regress cleanly.
+
+DoD: in a match, **Player 1 using only the keyboard** selects a miner, presses **`Space`** to move across the **economy → military → defense → tech** categories, presses **`E`** to open the one they want, and presses **`1`–`0`** to build from it — selecting the builder is no longer a dead-end, and the switch key can be changed in **Settings → Keyboard**. On the battlefield the **status indicators are tidy**: each unit/building shows a clean, ordered stack (level pip, HP bar, and a single construction/production/research bar) with **nothing overlapping**, HP bars appear only when relevant, and the **hero status and super-ability/super-weapon timers** sit in their own **fixed HUD zones** that **do not obstruct the main view** — the Generals/Dota-style clean readout. Verifiable headlessly: the `Space`-focus → `E`-confirm → `1`–`0` build path and the non-overlapping `entityOverlayLayout()` slots both pass; `bash build.sh` is clean and every test suite is green; all UI reads correctly in uz/ru/en.
 
 ---
 

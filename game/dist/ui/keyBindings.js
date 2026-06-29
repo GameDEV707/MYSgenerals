@@ -13,7 +13,7 @@ export function defaultKeyBindings() {
             cursorUp: "w", cursorLeft: "a", cursorDown: "s", cursorRight: "d",
             select: "e", command: "q",
             ability1: "z", ability2: "x", ability3: "c", ability4: "v",
-            nextTab: "]", prevTab: "[",
+            cycleCategory: "space", nextTab: "]", prevTab: "[",
         },
         p2: {
             ability1: "arrowup", ability2: "arrowright", ability3: "arrowleft", ability4: "arrowdown",
@@ -37,6 +37,7 @@ export const ACTION_DEFS = [
     { context: "p1", action: "ability2", labelKey: "key.ability2" },
     { context: "p1", action: "ability3", labelKey: "key.ability3" },
     { context: "p1", action: "ability4", labelKey: "key.ability4" },
+    { context: "p1", action: "cycleCategory", labelKey: "key.cycleCategory" },
     { context: "p1", action: "nextTab", labelKey: "key.nextTab" },
     { context: "p1", action: "prevTab", labelKey: "key.prevTab" },
     // Player 2 — mouse player hero abilities

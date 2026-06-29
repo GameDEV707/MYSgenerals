@@ -63,7 +63,7 @@ Needs the TypeScript compiler (`npm install -g typescript`).
 | Production queue | Select a producer → the queue strip shows order + progress; click a slot to cancel |
 | Factory upgrades | Select a Barracks / War Factory → **Production Bay** (build 2–3 at once) / **Assembly Speed** (+25% / +50%) |
 | Research | Select the Research Center → start a global upgrade (needs a built Research Center) |
-| Keyboard build (P1) | In keyboard control, `1`–`0` activate the command-panel buttons; `]` / `[` switch build categories |
+| Keyboard build (P1) | In keyboard control, `1`–`0` activate the command-panel buttons; with a builder selected, **`Space`** moves across the build categories and **`E`** opens the highlighted one (`]` / `[` also cycle directly). The switch key is remappable in Settings → Keyboard |
 | Minimap | Click to jump |
 | Pause | `☰` button (top-right) |
 
@@ -99,6 +99,15 @@ Every unit type now draws a distinct vector silhouette (miner, engineer, infantr
 robot, light/heavy tank, artillery, rocket launcher, anti-air, hero) with team colour, dark outline and
 the rank pip preserved — so tanks, artillery, rocket launchers and anti-air (and the various infantry)
 are recognisable at a glance.
+
+## Tidy on-screen status indicators
+
+World-space overlays are laid out by a single ordered helper (`entityOverlayLayout`) so they never
+overlap: the rank/level pip, the HP bar, and a **single** secondary bar (construction **or** production
+**or** research) each get their own fixed row above the entity. HP bars are shown only when relevant
+(selected, hovered, recently hit, damaged, or for your hero), keeping the battlefield uncluttered, and
+persistent hero status (HP, level, ability cooldowns) lives in the fixed hero HUD cluster rather than
+floating over the map — a clean, Generals/Dota-style readout.
 
 ## Multiplayer (LAN)
 
@@ -179,5 +188,7 @@ NODE_OPTIONS="" node test/production.mjs   # T26: parallel bays, assembly speed,
 NODE_OPTIONS="" node test/research.mjs     # T26: research effects (damage/armor/build-time) + Factory Tech gating
 NODE_OPTIONS="" node test/visuals.mjs      # T26: unitShape() — 11 distinct unit silhouettes
 NODE_OPTIONS="" node test/keyboard.mjs     # T26: digit → command-panel activation, no control-group clash
+NODE_OPTIONS="" node test/catnav.mjs       # T27: Space→E keyboard build-category navigation
+NODE_OPTIONS="" node test/overlay.mjs      # T27: entityOverlayLayout() — non-overlapping status overlays
 ```
 

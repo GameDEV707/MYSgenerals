@@ -52,6 +52,13 @@ export class InputController {
   // panel — a digit 1..0 activates the Nth grid button, Tab/brackets cycle build categories.
   onPanelDigit?: (index: number) => void;
   onCycleTab?: (dir: number) => void;
+  // T27 Part A: category-focus navigation for the keyboard player. `onCategoryFocus` advances a
+  // focus highlight across the build-category tabs; `onCategoryConfirm` opens the focused tab and
+  // returns true if it consumed the key (so `select` falls back to its normal meaning otherwise);
+  // `onCategoryCancel` clears focus (Esc).
+  onCategoryFocus?: () => void;
+  onCategoryConfirm?: () => boolean;
+  onCategoryCancel?: () => void;
 
   constructor(r: Renderer, world: WorldView, audio: AudioManager, opts?: { pointerType?: "mouse" | "touch" | null; keyboard?: boolean; control?: ControlMode }) {
     this.r = r; this.world = world; this.audio = audio;
@@ -376,6 +383,7 @@ export class InputController {
     this.keys.add(k);
     if (k === "escape") {
       this.r.placing = null; this.pendingAbility = -1; this.pendingAttackMove = false;
+      this.onCategoryCancel?.();
       this.cancelCursorSelect();
       return;
     }
@@ -397,7 +405,13 @@ export class InputController {
   private onKeyP1(k: string): void {
     const b = getKeyBindings().p1;
     if (k === b.command) { this.commandAtCursor(); return; }
-    if (k === b.select) { this.beginCursorSelect(); return; }
+    // T27 Part A: Space moves a focus highlight across the build categories; the select key (E)
+    // opens the focused category. If no category is focused, select falls back to cursor-select.
+    if (k === b.cycleCategory) { this.onCategoryFocus?.(); return; }
+    if (k === b.select) {
+      if (this.onCategoryConfirm && this.onCategoryConfirm()) return; // consumed the focused category
+      this.beginCursorSelect(); return;
+    }
     if (k === b.nextTab) { this.onCycleTab?.(1); return; }
     if (k === b.prevTab) { this.onCycleTab?.(-1); return; }
     // Digits 1..0 activate command-panel grid buttons #1..#10 (0 = the 10th), in visible order

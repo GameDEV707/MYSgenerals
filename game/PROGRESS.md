@@ -808,3 +808,112 @@ errors**. All **fifteen** suites pass: the existing eleven (`smoke`, `net`, `hos
 economy/army chain — the new mechanics are available to it through the same command pipeline but it
 doesn't prioritise them); the optional emoji type-glyph overlay above unit silhouettes (the colour-blind-
 safe shape cues + worker emblems already differentiate every type). No required T26 scope item is dropped.
+
+
+
+---
+
+## T27 — Keyboard build-category navigation (Space+select) & tidy on-screen status indicators  *(Player-1 keyboard UX + clutter-free HUD overlays)*
+
+> Source of truth: `../MYSgenerals.md` §24 → T27. **UI/UX only** — the authoritative sim (§3.2), the
+> `Command` union, the netcode and the T23/T24 split-screen input routing / per-side customizable HUD
+> are **unchanged**. This task refines input handling (`input.ts`, `keyBindings.ts`, `hud.ts`) and the
+> world-space overlay layout (`render/renderer.ts`).
+
+**Goal (restated):** (1) finish making **Player 1 fully keyboard-playable** — with a builder selected,
+press the switch key (**default `Space`**) to move a focus highlight across the build categories
+(economy / military / defense / tech) and the select key (**`E`**) to open the highlighted one, with the
+switch key **remappable in Settings**; and (2) make the battlefield **read cleanly like C&C Generals /
+Dota** — the rank/level pips, HP bars and the construction/production/research bars no longer overlap;
+they sit in a single **ordered, non-overlapping** overlay stack, HP bars show only when relevant, and
+persistent hero status lives in its fixed HUD cluster rather than floating over the map.
+
+**Defects fixed (with file references):**
+- **Keyboard category switching was undiscoverable.** T26 only had `nextTab`/`prevTab` (`]`/`[`) in
+  `ui/keyBindings.ts` → `input.ts onKeyP1()` → `hud.ts cycleBuildTab()`. A keyboard player who selected a
+  miner could not intuitively reach the **military / defense / tech** tabs, so every building outside
+  **economy** was effectively unreachable — the reported "select the builder, can't switch to military"
+  dead-end. Now `Space` moves a **focus highlight** and `E` **opens** the focused tab.
+- **On-screen indicators overlapped.** In `render/renderer.ts` the construction bar, the T26 production
+  head-item bar and the research bar were all drawn at `y - 7`, the HP bar just above the entity, and the
+  rank pip at `y - r - 2` — so a producing, low-HP, ranked building (or a hero with HP + mana + level)
+  smeared its overlays on top of one another. All overlays now flow through one ordered layout helper.
+
+### Scope checklist (T27)
+- [x] With a builder selected, a **keyboard** Player 1 presses the **switch key (default `Space`)** to move
+      a focus highlight across the build categories and **`E`** to open the highlighted one; `1`–`0` then
+      build from it. Military/defense/tech are reachable — the "won't switch" dead-end is fixed.
+- [x] The category **switch key is remappable** in Settings → Keyboard (default `Space`), with conflict
+      detection, persistence, reset, and a **trilingual** label; the help text documents the `Space`→`E` flow.
+- [x] World-space overlays (**rank/level pip, HP bar, construction/production/research bar, hero mana**) are
+      laid out by a **single ordered helper** (`entityOverlayLayout`) with **fixed, non-overlapping** slots
+      — no more colliding `y - 7` draws; only **one** secondary bar slot is ever used.
+- [x] HP bars follow a **show-when-relevant** rule (selected / hovered / recently-hit / damaged, plus always
+      the local hero), keeping the map uncluttered.
+- [x] **Hero status** (HP, level/XP, ability cooldowns) lives in its **fixed per-side HUD cluster** (the
+      `herobar` widget, T23/T24); only a minimal HP/mana bar + a `★level` pip remains over the hero on the
+      map. Hero ability/ultimate ("super") cooldowns are shown in that cluster, not floating.
+- [x] Overlays clip to each split-screen half (the renderer already clips `draw()` to its viewport),
+      respect reduce-motion/quality, and add **no per-frame allocations** (a reused `OverlaySlots` scratch).
+- [x] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography U+02BB/U+02BC);
+      `localeParity()` passes.
+- [x] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24)
+      and LAN (T25) regress cleanly.
+
+### Implementation summary
+- **`src/ui/keyBindings.ts`:** added **`cycleCategory`** to the **p1** group (default `"space"`) plus its
+  `ACTION_DEFS` entry (`key.cycleCategory`), so it is remappable, conflict-checked (per p1 context),
+  persisted, and resettable like every other binding. `nextTab`/`prevTab` (`]`/`[`) remain as an optional
+  direct-cycle shortcut.
+- **`src/input.ts`:** new callbacks `onCategoryFocus` / `onCategoryConfirm` (returns a boolean) /
+  `onCategoryCancel`. In `onKeyP1`, `cycleCategory` (Space) calls `onCategoryFocus`; the `select` key (E)
+  first calls `onCategoryConfirm()` and only falls back to `beginCursorSelect()` if it was **not** consumed;
+  the existing `Escape` handler now also calls `onCategoryCancel`. No clash with single-player control
+  groups (p1-keyboard has none) or the mouse player.
+- **`src/ui/hud.ts`:** a `catFocus` index (−1 = none) over the `CATS` array. `focusNextCategory()` advances
+  the highlight (wrapping, preview only — does not switch the tab); `confirmCategoryFocus()` opens the
+  focused tab and returns true; `cancelCategoryFocus()` clears it; all three are wired to the
+  InputController in `build()`. The miner panel renders a `.focus` class on the focused tab; `updatePanel`
+  folds `catFocus` into the rebuild signature and drops focus when the miner panel isn't shown.
+- **`src/render/renderer.ts`:** a pure, exported **`entityOverlayLayout(topY, out?)`** returning the
+  `OverlaySlots` (`pipY` / `secY` / `manaY` / `hpY` / `barH`) stacked above the entity so the rows never
+  collide; the renderer passes a reused `_ov` object (no per-frame allocation). `drawBuilding` now draws a
+  **single** secondary bar (construction → production → research priority) at `secY`; `drawHpBar` uses
+  `hpY` (+ hero mana at `manaY`) and a new `shouldShowHp()` declutter rule; `drawUnit` draws the rank pip
+  (and a hero `★level` pip) at `pipY`.
+- **`src/i18n.ts`:** `key.cycleCategory` and an updated `settings.panelKeys` help line (the `Space`→`E`
+  flow) in all three locales (Uzbek with U+02BB `ʻ`). **`styles.css`:** a `.tab.focus` highlight visually
+  distinct from `.tab.active`.
+
+### How each DoD line was verified
+**Quality gate.** `bash build.sh` compiles client + server with **zero TS errors**. **Seventeen** suites
+pass: the prior fifteen plus the two new T27 suites — `catnav` and `overlay`.
+
+- **Space→E category navigation.** `test/catnav.mjs` drives a `p1-keyboard` InputController with the same
+  category-focus callbacks the HUD wires: pressing `Space` advances the focus index and **wraps**, while
+  the **active tab is unchanged** (preview only); pressing `E` **opens** the focused category, is
+  **consumed** (the selection is untouched — no cursor-select fired), and a subsequent `1` then `Q` issues
+  a **build** from the newly-opened military category — proving the dead-end is fixed. `Esc` clears focus
+  without changing the tab; `E` with no focus performs a normal cursor-select; single-player `Space` does
+  nothing to the panel.
+- **Remappable + conflict-checked switch key.** `test/keybindings.mjs` asserts the `p1.cycleCategory`
+  default is `space` and that it participates in the per-context conflict detection (e.g. binding `command`
+  to `space` reports the `cycleCategory` conflict; rebinding `cycleCategory` to a free key has none).
+- **Non-overlapping overlays.** `test/overlay.mjs` asserts `entityOverlayLayout()` returns **distinct,
+  ordered** slots (`pipY < secY < hpY < topY`) with at least `barH` separation between rows (so none
+  overlap) across several `topY` values; that `manaY === secY` (the hero mana shares the single secondary
+  slot — never doubled); that it is deterministic; and that the optional `out` param is **reused** (the
+  returned object is the same reference — no per-frame allocation in the hot path).
+- **Show-when-relevant HP.** Implemented as `shouldShowHp()` (selected / hovered / recently-hit / damaged
+  / local hero); full-HP idle units draw no bar, decluttering the map (verified by reading the rule and by
+  the unchanged gameplay suites).
+- **Trilingual + parity.** `localeParity()` (in `test/smoke.mjs`) passes with the new keys present in
+  uz/ru/en.
+- **No regression.** The sim/netcode/split-screen routing are untouched; `smoke, net, host, lobby, input,
+  hudlayout, stress, split, keybindings, kbinput, lan, production, research, visuals, keyboard` all stay
+  green, and the renderer still clips each viewport in `draw()` (split-screen safe).
+
+**[OPT] deferred:** a separate "global powers / super-weapon" countdown strip — the only persistent
+super-ability today is the hero ultimate, whose cooldown already lives in the fixed `herobar` cluster, so
+no redundant floating strip was added; and an elaborate world-space status-icon row (brownout remains a
+building tint). No required T27 scope item is dropped.

@@ -21,6 +21,20 @@ const SHAPES = {
 export function unitShape(type) {
     return SHAPES[type] ?? SHAPES.infantry;
 }
+export function entityOverlayLayout(topY, out) {
+    const barH = 4;
+    const gap = 2;
+    const hpY = topY - (barH + 3); // HP bar just above the entity
+    const secY = hpY - (barH + gap); // secondary/mana bar stacked above HP (own row)
+    const pipY = secY - (barH + 5); // pip row above everything (own row)
+    const o = out ?? { hpY: 0, secY: 0, manaY: 0, pipY: 0, barH: 0 };
+    o.hpY = hpY;
+    o.secY = secY;
+    o.manaY = secY;
+    o.pipY = pipY;
+    o.barH = barH;
+    return o;
+}
 // A renderer draws one player's viewport. `viewport` (in CSS pixels) lets several renderers
 // share one canvas for split-screen (spec §21.1); it defaults to the full window.
 export class Renderer {
@@ -42,6 +56,8 @@ export class Renderer {
         this.virtualCursor = null;
         this.showFog = true;
         this.fullWindow = true;
+        // T27 Part B: reused overlay-slot scratch (avoids a per-frame allocation per entity).
+        this._ov = { hpY: 0, secY: 0, manaY: 0, pipY: 0, barH: 0 };
         this.toX = (wx) => this.vx + (wx - this.cam.x) * this.cam.zoom;
         this.toY = (wy) => this.vy + (wy - this.cam.y) * this.cam.zoom;
         this.canvas = canvas;
@@ -310,7 +326,6 @@ export class Renderer {
             this.roundRect(x, y, s, s, 4);
             ctx.stroke();
             ctx.setLineDash([]);
-            this.bar(x, y - 7, s, 5, e.buildProgress, "#ffb020");
         }
         else if (this.world.players[e.owner]?.brownout) {
             ctx.fillStyle = "rgba(255,80,40,0.12)";
@@ -325,14 +340,18 @@ export class Renderer {
             ctx.lineTo(this.toX(e.pos.x) + Math.cos(e.turret) * s * 0.45, this.toY(e.pos.y) + Math.sin(e.turret) * s * 0.45);
             ctx.stroke();
         }
-        // T26 Part A: on-map head-item production bar over the LOCAL player's producing buildings (so
-        // production is visible on the battlefield without selecting). Enemy queues are fog-filtered out.
-        if (!e.constructing && e.owner === this.world.me && e.queue.length > 0) {
-            this.bar(x, y - 7, s, 4, Math.min(1, e.queue[0].progress), "#38bdf8");
+        // T27 Part B: a single ordered overlay stack — the HP bar and ONE secondary bar (construction,
+        // production head-item, or research; mutually exclusive) share fixed, non-overlapping slots.
+        const slots = entityOverlayLayout(y, this._ov);
+        if (e.constructing) {
+            this.bar(x, slots.secY, s, slots.barH, e.buildProgress, "#ffb020");
         }
-        // T26 Part C: research progress bar on the LOCAL player's Research Center (like construction).
-        if (!e.constructing && e.owner === this.world.me && e.researching) {
-            this.bar(x, y - 7, s, 4, Math.min(1, e.researching.progress), "#a78bfa");
+        else if (e.owner === this.world.me && e.queue.length > 0) {
+            // on-map head-item production bar over the local player's producing buildings
+            this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.queue[0].progress), "#38bdf8");
+        }
+        else if (e.owner === this.world.me && e.researching) {
+            this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.researching.progress), "#a78bfa");
         }
         this.drawHpBar(e, s);
         if (this.selection.has(e.id))
@@ -405,11 +424,24 @@ export class Renderer {
             ctx.fill();
             ctx.globalAlpha = a0;
         }
-        if (e.rank > 0) {
-            ctx.fillStyle = e.rank >= 3 ? "#ffd23f" : "#cfd8e0";
-            ctx.font = `${Math.floor(z * 0.4)}px sans-serif`;
-            ctx.textAlign = "center";
-            ctx.fillText("›".repeat(e.rank), x, y - r - 2);
+        // T27 Part B: rank/level pip in its own overlay slot (above the bars, never overlapping them).
+        if (e.rank > 0 || e.hero) {
+            const slots = entityOverlayLayout(y - r, this._ov);
+            if (e.hero) {
+                const lvl = this.world.players[e.owner]?.heroLevel ?? 1;
+                ctx.fillStyle = "#ffd23f";
+                ctx.font = `bold ${Math.floor(z * 0.34)}px sans-serif`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "alphabetic";
+                ctx.fillText("★" + lvl, x, slots.pipY + slots.barH);
+            }
+            else {
+                ctx.fillStyle = e.rank >= 3 ? "#ffd23f" : "#cfd8e0";
+                ctx.font = `${Math.floor(z * 0.4)}px sans-serif`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "alphabetic";
+                ctx.fillText("›".repeat(e.rank), x, slots.pipY + slots.barH);
+            }
         }
         this.drawHpBar(e, r * 2);
     }
@@ -643,13 +675,32 @@ export class Renderer {
                 ctx.fillRect(this.toX(x), this.toY(y), z + 1, z + 1);
             }
     }
+    // T27 Part B: show-when-relevant rule (Generals/Dota declutter). A full-HP idle unit shows no
+    // bar; bars appear for selected, hovered, recently-hit or damaged entities, and always for the
+    // local player's hero.
+    shouldShowHp(e) {
+        if (this.selection.has(e.id))
+            return true;
+        if (e.hero && e.owner === this.world.me)
+            return true;
+        if (e.hp < e.maxHp)
+            return true;
+        if (e.hitFlash > 0)
+            return true;
+        const d = Math.hypot(e.pos.x - this.mouseWorld.x, e.pos.y - this.mouseWorld.y);
+        return d < e.radius + 0.5;
+    }
     drawHpBar(e, w) {
-        if (e.hp >= e.maxHp && !this.selection.has(e.id))
+        if (!this.shouldShowHp(e))
             return;
-        const x = this.toX(e.pos.x) - w / 2, y = this.toY(e.pos.y) - (e.kind === "building" ? w / 2 : e.radius * this.cam.zoom) - 6;
-        this.bar(x, y, w, 4, e.hp / e.maxHp, e.hp / e.maxHp > 0.5 ? "#34d399" : e.hp / e.maxHp > 0.25 ? "#ffb020" : "#ef4444");
+        const halfH = e.kind === "building" ? w / 2 : e.radius * this.cam.zoom;
+        const topY = this.toY(e.pos.y) - halfH;
+        const slots = entityOverlayLayout(topY, this._ov);
+        const x = this.toX(e.pos.x) - w / 2;
+        this.bar(x, slots.hpY, w, slots.barH, e.hp / e.maxHp, e.hp / e.maxHp > 0.5 ? "#34d399" : e.hp / e.maxHp > 0.25 ? "#ffb020" : "#ef4444");
+        // The hero mana bar takes the secondary slot (a hero never shows a build/research bar).
         if (e.hero) {
-            this.bar(x, y - 5, w, 3, e.hero.mana / e.hero.maxMana, "#38bdf8");
+            this.bar(x, slots.manaY, w, 3, e.hero.mana / e.hero.maxMana, "#38bdf8");
         }
     }
     bar(x, y, w, h, frac, color) {

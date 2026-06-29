@@ -97,7 +97,7 @@ const en: Dict = {
   "settings.resetGroup": "Reset",
   "settings.conflict": "Key already used by: {action}",
   "settings.controlGroups": "Control groups: Ctrl+0–9 to assign, 0–9 to recall (fixed).",
-  "settings.panelKeys": "Player 1 (keyboard): 1–0 activate the command-panel buttons; the build-tab keys above switch categories. (Single-player keeps 0–9 for control groups.)",
+  "settings.panelKeys": "Player 1 (keyboard): with a builder selected, Space moves across the build categories and E opens the highlighted one; 1–0 activate the command-panel buttons. (Single-player keeps 0–9 for control groups.)",
   "key.cursorUp": "Cursor up",
   "key.cursorDown": "Cursor down",
   "key.cursorLeft": "Cursor left",
@@ -235,6 +235,7 @@ const en: Dict = {
 
   "key.nextTab": "Next build tab",
   "key.prevTab": "Previous build tab",
+  "key.cycleCategory": "Move build category (focus)",
 
   "toast.unitReady": "Unit ready",
   "toast.unitReadyNamed": "{unit} ready",
@@ -358,7 +359,7 @@ const ru: Dict = {
   "settings.resetGroup": "Сброс",
   "settings.conflict": "Клавиша уже занята: {action}",
   "settings.controlGroups": "Группы управления: Ctrl+0–9 — назначить, 0–9 — вызвать (фиксировано).",
-  "settings.panelKeys": "Игрок 1 (клавиатура): 1–0 активируют кнопки панели команд; клавиши вкладок выше переключают категории. (В одиночной игре 0–9 остаются для групп управления.)",
+  "settings.panelKeys": "Игрок 1 (клавиатура): с выбранным строителем Пробел перемещает по категориям, E открывает выделенную; 1–0 активируют кнопки панели команд. (В одиночной игре 0–9 остаются для групп управления.)",
   "key.cursorUp": "Курсор вверх",
   "key.cursorDown": "Курсор вниз",
   "key.cursorLeft": "Курсор влево",
@@ -496,6 +497,7 @@ const ru: Dict = {
 
   "key.nextTab": "Следующая вкладка постройки",
   "key.prevTab": "Предыдущая вкладка постройки",
+  "key.cycleCategory": "Переместить категорию (фокус)",
 
   "toast.unitReady": "Юнит готов",
   "toast.unitReadyNamed": "{unit} готов",
@@ -619,7 +621,7 @@ const uz: Dict = {
   "settings.resetGroup": "Tiklash",
   "settings.conflict": "Tugma allaqachon band: {action}",
   "settings.controlGroups": "Boshqaruv guruhlari: Ctrl+0–9 — tayinlash, 0–9 — chaqirish (qatʼiy).",
-  "settings.panelKeys": "1-oʻyinchi (klaviatura): 1–0 buyruq paneli tugmalarini ishga tushiradi; yuqoridagi qurish boʻlimi tugmalari toifalarni almashtiradi. (Yakka oʻyinda 0–9 boshqaruv guruhlari uchun qoladi.)",
+  "settings.panelKeys": "1-oʻyinchi (klaviatura): quruvchi tanlanganda Boʻshliq (Space) qurish boʻlimlari boʻylab harakatlanadi, E belgilangan boʻlimni ochadi; 1–0 buyruq paneli tugmalarini ishga tushiradi. (Yakka oʻyinda 0–9 boshqaruv guruhlari uchun qoladi.)",
   "key.cursorUp": "Kursor yuqoriga",
   "key.cursorDown": "Kursor pastga",
   "key.cursorLeft": "Kursor chapga",
@@ -757,6 +759,7 @@ const uz: Dict = {
 
   "key.nextTab": "Keyingi qurish boʻlimi",
   "key.prevTab": "Oldingi qurish boʻlimi",
+  "key.cycleCategory": "Qurish boʻlimini surish (fokus)",
 
   "toast.unitReady": "Birlik tayyor",
   "toast.unitReadyNamed": "{unit} tayyor",

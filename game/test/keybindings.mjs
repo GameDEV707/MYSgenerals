@@ -22,6 +22,7 @@ assert(d.p1.cursorUp === "w" && d.p1.cursorLeft === "a" && d.p1.cursorDown === "
 assert(d.p1.select === "e" && d.p1.command === "q", "P1 select = E, command = Q");
 assert(d.p1.ability1 === "z" && d.p1.ability2 === "x" && d.p1.ability3 === "c" && d.p1.ability4 === "v", "P1 abilities = Z/X/C/V");
 assert(d.p1.nextTab === "]" && d.p1.prevTab === "[", "P1 build-tab cycle = ] / [ (T26)");
+assert(d.p1.cycleCategory === "space", "P1 category switch = Space (T27)");
 assert(d.p2.ability1 === "arrowup" && d.p2.ability2 === "arrowright" && d.p2.ability3 === "arrowleft" && d.p2.ability4 === "arrowdown", "P2 abilities = arrow keys");
 assert(d.shared.ability1 === "q" && d.shared.ability2 === "w" && d.shared.ability3 === "e" && d.shared.ability4 === "r", "Single-player abilities = Q/W/E/R");
 
@@ -39,6 +40,9 @@ assert(kb.findConflict(d, "p1", "command", "k") === null, "a free key has no con
 // T26: the new build-tab keys are conflict-checked within the P1 context like every other binding.
 assert(kb.findConflict(d, "p1", "nextTab", "[") === "prevTab", "P1 nextTab=[ conflicts with prevTab");
 assert(kb.findConflict(d, "p1", "select", "]") === "nextTab", "P1 select=] conflicts with nextTab");
+// T27: the category switch key (Space) is conflict-checked within the P1 context like any binding.
+assert(kb.findConflict(d, "p1", "command", "space") === "cycleCategory", "P1 command=Space conflicts with cycleCategory");
+assert(kb.findConflict(d, "p1", "cycleCategory", "k") === null, "rebinding cycleCategory to a free key has no conflict");
 // the same physical key in DIFFERENT contexts is allowed (P1 'q' and shared 'q' can't cross-control)
 assert(kb.findConflict(d, "shared", "ability1", "q") === null, "shared can use Q even though P1 command is Q (different player)");
 

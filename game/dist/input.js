@@ -495,6 +495,7 @@ export class InputController {
             this.r.placing = null;
             this.pendingAbility = -1;
             this.pendingAttackMove = false;
+            this.onCategoryCancel?.();
             this.cancelCursorSelect();
             return;
         }
@@ -522,7 +523,15 @@ export class InputController {
             this.commandAtCursor();
             return;
         }
+        // T27 Part A: Space moves a focus highlight across the build categories; the select key (E)
+        // opens the focused category. If no category is focused, select falls back to cursor-select.
+        if (k === b.cycleCategory) {
+            this.onCategoryFocus?.();
+            return;
+        }
         if (k === b.select) {
+            if (this.onCategoryConfirm && this.onCategoryConfirm())
+                return; // consumed the focused category
             this.beginCursorSelect();
             return;
         }

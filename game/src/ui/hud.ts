@@ -21,6 +21,9 @@ export class HUD {
   root: HTMLElement; world: WorldView; r: Renderer; input: InputController; audio: AudioManager;
   tab = "economy";
   private sig = "";
+  // T27 Part A: build categories + the keyboard category-focus index (-1 = no focus).
+  private readonly CATS = ["economy", "military", "defense", "tech"];
+  private catFocus = -1;
   onQuit?: () => void; onRematch?: () => void;
   onPauseToggle?: (paused: boolean) => void;
   showRematch = true;
@@ -86,6 +89,10 @@ export class HUD {
     // cycle build categories with the bound nextTab/prevTab keys.
     this.input.onPanelDigit = (i) => this.activatePanelDigit(i);
     this.input.onCycleTab = (d) => this.cycleBuildTab(d);
+    // T27 Part A: Space moves a category-focus highlight; the select key (E) opens the focused tab.
+    this.input.onCategoryFocus = () => this.focusNextCategory();
+    this.input.onCategoryConfirm = () => this.confirmCategoryFocus();
+    this.input.onCategoryCancel = () => this.cancelCategoryFocus();
     const herobar = this.q("herobar") as HTMLElement;
     herobar.addEventListener("click", (e) => this.onHeroClick(e));
     const mm = this.q("minimap") as HTMLCanvasElement;
@@ -144,8 +151,11 @@ export class HUD {
     const miner = own.find((e) => e.type === "miner");
     const research = own.find((e) => e.kind === "building" && e.type === "research_center");
     const prod = own.find((e) => e.kind === "building" && BUILDING_DEFS[e.type as BuildingId].produces);
+    // T27 Part A: category-focus only applies to the miner build panel; drop it otherwise.
+    const minerPanel = !!miner && !research && !prod;
+    if (!minerPanel && this.catFocus >= 0) this.catFocus = -1;
     const kb = this.input.control === "p1-keyboard" ? "K" : "";
-    let sig = own.map((e) => e.id + e.type).join(",") + "|" + this.tab + "|" + kb + (miner ? "m" : "");
+    let sig = own.map((e) => e.id + e.type).join(",") + "|" + this.tab + "|" + kb + (miner ? "m" : "") + "|F" + this.catFocus;
     if (prod) sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".");
     if (research) { const r = this.me().research; sig += "|R" + research.id + ":" + (research.researching ? "act" + research.researching.id : "idle") + ":" + r.weapons + r.armor + r.factoryTech + (r.logistics ? 1 : 0); }
     const panel = this.q("cmdpanel"); if (!panel) return;
@@ -200,8 +210,8 @@ export class HUD {
     if (research) return this.researchPanelHtml(research);
     if (prod) return this.prodPanelHtml(prod);
     if (miner) {
-      const tabs = ["economy", "military", "defense", "tech"].map((c) =>
-        `<div class="tab ${this.tab === c ? "active" : ""}" data-act="tab" data-cat="${c}">${t("cat." + c)}</div>`).join("");
+      const tabs = this.CATS.map((c, i) =>
+        `<div class="tab ${this.tab === c ? "active" : ""}${this.catFocus === i ? " focus" : ""}" data-act="tab" data-cat="${c}">${t("cat." + c)}</div>`).join("");
       const list = (BUILD_MENU[this.tab] || []).map((b) => this.buildBtn(b)).join("");
       return `<h4>${t("units.miner.name")} — ${t("cat.build")}</h4>
         <div class="tabs">${tabs}</div><div class="grid">${list}</div>`;
@@ -381,10 +391,44 @@ export class HUD {
   }
   // T26 Part E: cycle the miner build categories (only meaningful when the miner panel is shown).
   private cycleBuildTab(dir: number): void {
-    const cats = ["economy", "military", "defense", "tech"];
-    const i = cats.indexOf(this.tab);
+    const i = this.CATS.indexOf(this.tab);
     if (i < 0) return;
-    this.tab = cats[(i + dir + cats.length) % cats.length];
+    this.tab = this.CATS[(i + dir + this.CATS.length) % this.CATS.length];
+    this.catFocus = -1;
+    this.sig = "";
+  }
+
+  // T27 Part A — keyboard category-focus navigation. Only active while the miner build panel (the
+  // economy/military/defense/tech tabs) is shown.
+  private minerPanelShown(): boolean {
+    const me = this.world.me;
+    const own = this.selectedEntities().filter((e) => e.owner === me);
+    const miner = own.find((e) => e.type === "miner");
+    const research = own.find((e) => e.kind === "building" && e.type === "research_center");
+    const prod = own.find((e) => e.kind === "building" && BUILDING_DEFS[e.type as BuildingId].produces);
+    return !!miner && !research && !prod;
+  }
+  // Space: move the focus highlight to the next category (previews only — does not switch the tab).
+  private focusNextCategory(): void {
+    if (!this.minerPanelShown()) return;
+    const base = this.catFocus < 0 ? this.CATS.indexOf(this.tab) : this.catFocus;
+    this.catFocus = (base + 1) % this.CATS.length;
+    this.sig = ""; // re-render to show the focus outline
+    this.audio.play("click");
+  }
+  // E: open the focused category (it becomes active). Returns true if it consumed the key.
+  private confirmCategoryFocus(): boolean {
+    if (this.catFocus < 0) return false;
+    this.tab = this.CATS[this.catFocus];
+    this.catFocus = -1;
+    this.sig = "";
+    this.audio.play("click");
+    return true;
+  }
+  // Esc: clear the focus without changing the active category.
+  private cancelCategoryFocus(): void {
+    if (this.catFocus < 0) return;
+    this.catFocus = -1;
     this.sig = "";
   }
 

@@ -221,6 +221,8 @@ select, input {
 .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .tab { flex: 1; font-size: 11px; padding: 5px; text-align: center; background: #0d141d; border: 1px solid var(--border); border-radius: 5px; cursor: pointer; }
 .tab.active { border-color: var(--accent); color: var(--accent); }
+/* T27 Part A: keyboard category-focus highlight — distinct from the active tab (dashed glow). */
+.tab.focus { border-color: var(--accent-2); color: var(--accent-2); box-shadow: 0 0 0 2px rgba(255,210,63,0.35); outline: 1px dashed var(--accent-2); outline-offset: 1px; }
 
 .selinfo {
   position: absolute; left: 340px; bottom: 10px;

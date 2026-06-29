@@ -1089,7 +1089,7 @@ Single-player needs a competent AI so the game is fun solo. The AI runs **on the
 
 ---
 
-## 24. BUILD TASK PLAN (T0 – T27)
+## 24. BUILD TASK PLAN (T0 – T28)
 
 Tasks are **ordered**. Each has a **Goal**, a **Scope checklist** (every box must be checked), and a **Definition of Done (DoD)**. A task ships only when all boxes are checked and all DoD lines pass. Tasks reference the design sections above for exact numbers and behaviors. Every animation/VFX listed in §16 for a feature is part of that feature's task — "functional but no animation" is **not** done.
 
@@ -1741,6 +1741,71 @@ Centralize all offset math here; remove the colliding `y - 7` literals so a prod
 - [ ] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24) and LAN (T25) regress cleanly.
 
 DoD: in a match, **Player 1 using only the keyboard** selects a miner, presses **`Space`** to move across the **economy → military → defense → tech** categories, presses **`E`** to open the one they want, and presses **`1`–`0`** to build from it — selecting the builder is no longer a dead-end, and the switch key can be changed in **Settings → Keyboard**. On the battlefield the **status indicators are tidy**: each unit/building shows a clean, ordered stack (level pip, HP bar, and a single construction/production/research bar) with **nothing overlapping**, HP bars appear only when relevant, and the **hero status and super-ability/super-weapon timers** sit in their own **fixed HUD zones** that **do not obstruct the main view** — the Generals/Dota-style clean readout. Verifiable headlessly: the `Space`-focus → `E`-confirm → `1`–`0` build path and the non-overlapping `entityOverlayLayout()` slots both pass; `bash build.sh` is clean and every test suite is green; all UI reads correctly in uz/ru/en.
+
+---
+
+### T28 — Hero panel on-select, power gating & low-power warning, keyboard zoom, and a tidy hero/level HUD cluster  *(HUD + economy fixes)*
+
+**Goal:** four concrete fixes reported in play: (1) the **hero's "super" abilities** must appear **only when the hero is selected** — right now the hero ability bar is shown by **default** all the time; (2) fix the **power/energy** bug — buildings get constructed even with **no spare power**; instead, once power usage passes **90%** of generation a **"LOW POWER" warning** must show, and trying to place a **power-consuming** building that there isn't enough power for must be **rejected** ("not enough power") rather than built; (3) give **Player 1 (keyboard)** **zoom in / zoom out** so they can see the map closer or farther — **default `Shift` = zoom in, `Ctrl` = zoom out**, both **remappable in Settings**; (4) **reposition the level indicator** — today the `★ Lvl` badge **overlaps the command-panel buttons** (see the reported screenshot: `★ Lvl 1` sitting on top of the Stop / Hold / Attack-Move buttons). The on-map level pip over the hero stays as-is (good); the **HUD** must **not** show the floating/overlapping level badge by default — instead, when the **hero is selected**, the hero's **level + abilities** appear **neatly inside the command-panel area**, slightly nicer, with the super abilities arranged tidily in the same place. **This applies to all players** (single-player, split-screen P1 & P2, and LAN).
+
+**Why this task (current defects, with file references):**
+- **Hero ability bar is always visible.** `ui/hud.ts` creates the `herobar` widget (`<div class="herobar hud-widget" data-widget="hero">`) in `build()` and `updateHeroBar()` populates it **every frame regardless of selection**, so the hero portrait + ability icons (`ABILITY_ICONS`) are on screen even when the hero isn't selected. It should be shown **only when the hero is in the current selection**.
+- **No power gate on construction.** `sim/world.ts tryBuild()` validates **cost** (`canAfford`), **prerequisite** (`def.requires`) and **placement** (`placementValid`), but **never checks power**. A power-consuming building can be started with zero headroom. The "LOW POWER" banner (`hud.lowPower`, toggled in `ui/hud.ts updateHud()` from `p.brownout`) only lights up once usage **already exceeds** generation (full brownout), not at the **90%** threshold the player expects. There is no per-build "not enough power" rejection.
+- **Keyboard player can't zoom.** `input.ts acceptsWheel()` returns false for `control === "p1-keyboard"`, so only the mouse wheel zooms `renderer.cam.zoom`. The keyboard player has **no** way to zoom the map.
+- **Level badge overlaps the command panel.** `ui/hud.ts updateHeroBar()` and `updateSelInfo()` render a `★ Lvl {n}` badge (`.lvl` / the `extra` block); positioned with the HUD widgets it **overlaps** the command-panel buttons (the reported screenshot shows `★ Lvl 1` over the Stop/Hold/Attack-Move row). The on-map hero level pip (`render/renderer.ts drawUnit`, the `★level` drawn at the pip slot from T27) is correct and should stay.
+
+> Scope note: like T27 this is **UI/UX + a small economy rule**. The power **gate** is an authoritative-sim check inside `tryBuild` (so it holds in single-player, split-screen and LAN identically); everything else is client HUD/input. Do **not** change the netcode or the T23/T24 split-screen input routing beyond adding the new keyboard bindings and the build-time power check. Regress cleanly in single-player, split-screen (T24) and LAN (T25).
+
+---
+
+#### Part A — Hero "super" abilities panel only when the hero is selected
+
+**A1.** The hero ability bar (the `herobar` widget driven by `updateHeroBar()`) is **hidden** whenever the hero is **not** in the current selection, and shown only when the selection includes the player's hero. When hidden it must not occupy/overlap layout space (`display:none`, not just empty).
+**A2.** It still updates live (HP, mana, ability cooldowns, level) while shown. Selecting the hero (by click, double-click, control-group, or the keyboard cursor) reveals it; deselecting hides it again.
+**A3.** The on-map hero (HP bar, mana, `★level` pip from T27) is **unchanged** — only the always-on HUD ability panel is gated by selection.
+
+#### Part B — Power gating on construction + 90% low-power warning
+
+**B1. Low-power warning at 90%.** Show the **"LOW POWER"** banner (`hud.lowPower`) and the deficit styling once **power usage ≥ 90% of generation** (i.e. `powerUse >= 0.9 * powerGen`), not only at full brownout. Keep a distinct, stronger state for an actual deficit/brownout (`powerUse > powerGen`) — the existing production slow-down (`BROWNOUT_PRODUCTION_MULT`) is unchanged.
+**B2. Reject under-powered builds.** In `world.ts tryBuild()`, after the cost/prereq/placement checks, if the building **consumes** power and starting it would push **total usage above generation** (no spare headroom — e.g. gen 10, used 9, new build needs 2 → would be 11 > 10), **reject** the build with a new `errors.needPower` danger toast and **do not** construct or charge for it. Power-**producing** buildings (power plant, etc.) are never blocked by this. (Power-neutral buildings are unaffected.)
+**B3.** The check must be authoritative (in the sim, host-side) so it behaves identically in single-player, split-screen and LAN; the client may additionally grey/annotate the build button, but the sim is the source of truth.
+
+#### Part C — Player-1 keyboard zoom in / out (remappable)
+
+**C1.** Add two **remappable** bindings to the **p1** group of `ui/keyBindings.ts`: **`zoomIn` (default `Shift`)** and **`zoomOut` (default `Ctrl`)**, each with `ACTION_DEFS` entries, conflict detection, persistence, reset, and **trilingual** labels in **Settings → Keyboard**.
+**C2.** In `input.ts`, the keyboard player zooms `renderer.cam.zoom` in/out (held-to-zoom or per-press step) within sensible **min/max** bounds, re-clamping the camera (`clampCam`) and keeping the view centred sensibly. This works for the `p1-keyboard` control scheme (which the mouse wheel ignores).
+**C3.** No clash: `p1-keyboard` has no control groups, so `Shift`/`Ctrl` are free there; the mouse player's wheel-zoom and Player 2's input are unaffected. Update the in-game help / Settings text to mention keyboard zoom.
+
+#### Part D — Tidy hero/level HUD cluster in the command-panel area (all players)
+
+**D1.** Remove the **floating/overlapping** `★ Lvl` badge from the default HUD so it never sits on top of the command-panel buttons (the reported screenshot bug). The on-map hero level pip stays.
+**D2.** When the **hero is selected**, present the hero's **level + abilities** **inside the command-panel area** (the same zone as the Stop/Hold/Attack-Move and build/train controls), **neatly laid out** (a small hero header with `★ Lvl n`, HP/mana, and the ability icons with cooldowns) — no overlap with other panel content, slightly nicer styling than today.
+**D3.** This hero cluster is shown **only on hero selection** (consistent with Part A) and works the **same for all players**: single-player, both split-screen sides (using each side's HUD anchors, no cross-divider bleed — T23/T24), and LAN.
+**D4.** Selection-info for non-hero units keeps its own tidy level/rank display without overlapping the command buttons.
+
+---
+
+#### Cross-cutting
+
+**i18n.** Add every new user-facing string in **uz/ru/en** with correct Uzbek orthography (U+02BB `ʻ`, U+02BC `ʼ`): `errors.needPower`, the `zoomIn` / `zoomOut` action labels, and any updated low-power / help text. `localeParity()` must stay green; no hard-coded strings.
+
+**Tests (headless, dependency-free, in `test/`).** Add/extend suites and keep all existing green:
+- **power gate**: a power-consuming build is **rejected** (no spawn, no charge, `errors.needPower` emitted) when usage would exceed generation, and **allowed** when there is headroom; a power-**producing** building is never blocked; the 90%-usage state is reported (low-power) distinctly from a full deficit.
+- **keyboard zoom**: `zoomIn` / `zoomOut` defaults are `shift` / `ctrl`, are conflict-checked/persisted, and pressing them changes `cam.zoom` within bounds for the keyboard player (extend `keybindings` / `kbinput`).
+- **hero panel visibility**: the hero ability cluster is hidden with no hero selected and shown when the hero is selected (logic-level test of the visibility predicate).
+
+**Docs.** On implementation, add a **T28 section to `PROGRESS.md`** in the T24–T27 style (Scope checklist, "How each DoD line was verified", "[OPT] deferred"), and update `README.md` (hero panel appears on selection; power rule + low-power warning; keyboard zoom keys `Shift`/`Ctrl`, remappable).
+
+### Scope checklist (T28)
+- [ ] The hero's ability ("super") panel is shown **only when the hero is selected**, hidden (no layout footprint) otherwise; it still updates live while shown.
+- [ ] A **"LOW POWER"** warning appears once power usage **≥ 90%** of generation; a full deficit remains a distinct (stronger) state with the existing brownout slow-down.
+- [ ] Building a **power-consuming** structure with **insufficient power** is **rejected** with an `errors.needPower` toast (authoritative, in `tryBuild`) — not constructed and not charged; power producers are never blocked.
+- [ ] **Player 1 (keyboard)** can **zoom in/out** the map; defaults **`Shift`** (in) / **`Ctrl`** (out), **remappable** in Settings (conflict-checked, persisted, trilingual), within clamped bounds.
+- [ ] The **`★ Lvl` badge no longer overlaps** the command panel; the on-map hero level pip is unchanged; when the hero is selected its **level + abilities** appear **neatly in the command-panel area** for **all players** (single, split P1/P2, LAN), split-screen-safe.
+- [ ] All new strings are **trilingual** (uz/ru/en, correct Uzbek orthography); `localeParity()` passes.
+- [ ] New + existing **headless tests pass**; `bash build.sh` is clean; single-player, split-screen (T24) and LAN (T25) regress cleanly.
+
+DoD: in a match, the **hero ability panel is hidden** until the hero is selected, then appears **tidily in the command-panel area** (with `★ Lvl`, HP/mana and abilities) with **no overlap** on the Stop/Hold/Attack-Move / build controls — for **every** player; the **on-map** hero level pip is unchanged. The **power economy is honest**: at **≥ 90%** usage a **LOW POWER** warning shows, and a power-hungry building that there isn't enough power for is **refused** ("not enough power") instead of silently building, while power plants always build. **Player 1 on the keyboard** can **zoom in with `Shift` and out with `Ctrl`** (remappable). Verifiable headlessly: the `tryBuild` power gate (reject/allow + toast), the `zoomIn`/`zoomOut` bindings + `cam.zoom` change, and the hero-panel visibility predicate all pass; `bash build.sh` is clean and every suite is green; all UI reads correctly in uz/ru/en.
 
 ---
 

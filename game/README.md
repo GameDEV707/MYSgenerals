@@ -192,6 +192,41 @@ warning appears (a full deficit turns it red and slows production), and trying t
 structure with no headroom is refused with a "not enough power" message — build a **Power Plant** first.
 Power producers are never blocked.
 
+## Online play (over the internet, no host.bat, no server)
+
+You can play **online over the internet** straight from the browser — **no `host.bat`, no server we
+run**. Gameplay is **peer-to-peer** (WebRTC data channel, STUN-only for NAT discovery); the host runs
+the authoritative game in their browser tab and friends connect directly.
+
+Because it is truly serverless, the invite is a **two-step code exchange** (rather than a one-click
+link):
+
+### Host an online game
+
+1. **Play → Host Local Game**, then in the **Connection** panel flip the toggle to
+   **Online (invite a friend)**.
+2. Click **Create invite** and **Copy** the invite code (also shareable as a `#join=…` link).
+3. Send it to your friend (any chat). When they send back their **reply code**, paste it into
+   **Paste the reply code** and click **Connect device** — they appear as a lobby slot.
+4. Repeat **Create invite** for each additional friend (2–4 players), then **Start Match**.
+
+### Join an online game
+
+1. **Play → Join Online Game** (or just open a `#join=…` link, which pre-fills the invite).
+2. Paste the host's invite code and click **Generate reply**.
+3. **Copy** the reply code and send it back to the host. Once they apply it you drop straight into
+   the lobby and then the match — connected **directly, peer-to-peer**.
+
+> **STUN-only / TURN deferred:** most networks connect over free STUN. A minority of strict/symmetric
+> NATs (~10–20%) need a **TURN relay**, which would be a server we operate, so it is **out of scope**
+> (documented in the lobby). If a direct connection can't be formed, try a different network.
+
+### Local host (this device) — also no launcher
+
+The **Local (this device)** toggle (the default) runs single-player, **split-screen** and **vs-AI**
+entirely in the tab with **no launcher**. Every player can also **edit their own name** in the lobby
+(it persists across sessions).
+
 ## Multiplayer (LAN)
 
 Single-player and local split-screen run entirely in the browser tab (`run.bat` / `serve.mjs`
@@ -245,7 +280,8 @@ game/
 ├─ src/
 │  ├─ constants.ts, types.ts, data.ts, i18n.ts   # shared core (numbers, defs, damage matrix, locales)
 │  ├─ sim/        # engine-agnostic authoritative simulation (no DOM): world, grid, map, ai
-│  ├─ net/        # protocol, loopback + WebSocket transports, QR encoder
+│  ├─ net/        # protocol, loopback + WebSocket + WebRTC transports, serverless signaling codec, QR
+│  ├─ host/       # engine-agnostic GameHost (authoritative loop) + Lobby + MatchHost
 │  ├─ server/     # authoritative Node host: static serving + RFC6455 WebSocket + lobby
 │  ├─ render/     # canvas renderer, pooled FX, WebAudio
 │  ├─ ui/         # menu + lobby + HUD (DOM overlay)
@@ -285,5 +321,13 @@ NODE_OPTIONS="" node test/workers.mjs      # T31: split worker roles — Enginee
 NODE_OPTIONS="" node test/maps.mjs         # T32: bigger fortified maps — wall/obstacle terrain, gate reachability, outposts, new big map
 NODE_OPTIONS="" node test/outpost.mjs      # T32: capturable garrisoned outpost — fires on intruders, invulnerable, capture = ownership, build anchor
 NODE_OPTIONS="" node test/minefind.mjs     # T32: reachability-aware miner assignment (skips walled-off mines; re-routes when stuck)
+NODE_OPTIONS="" node test/gamehost.mjs     # T33: transport-agnostic GameHost over a mock peer sink — join/lobby/ready/start, fog snapshots, command ownership
+NODE_OPTIONS="" node test/signal.mjs       # T33: serverless WebRTC invite/reply codec — encode→decode round-trip, tolerant parsing, rejects junk
+NODE_OPTIONS="" node test/online.mjs        # T33: editable-name persistence (localStorage) + Local/Online toggle predicates
 ```
+
+> **Online (WebRTC) is user-verified.** The sandbox has no outbound internet and the headless runner has
+> no `RTCPeerConnection`, so the **real peer-to-peer connection is verified manually in a browser**. The
+> transport-agnostic pieces (`GameHost`, the signaling codec, name editing, the mode toggle) are covered
+> by the suites above.
 

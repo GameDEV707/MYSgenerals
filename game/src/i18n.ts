@@ -286,6 +286,32 @@ const en: Dict = {
   "stats.unitsLost": "Units lost",
   "stats.buildingsDestroyed": "Buildings destroyed",
   "stats.time": "Match time",
+
+  "menu.joinOnline": "Join Online Game",
+  "lobby.modeLocal": "Local (this device)",
+  "lobby.modeOnline": "Online (invite a friend)",
+  "lobby.localNote": "Single-player, split-screen and vs-AI run on this device. Switch to Online to invite a friend over the internet — no host.bat, no server.",
+  "lobby.onlineHostHint": "Create an invite and send it to your friend, then paste the reply they send back.",
+  "lobby.inviteCode": "Invite code",
+  "lobby.createInvite": "Create invite",
+  "lobby.newInvite": "New invite",
+  "lobby.generating": "Generating…",
+  "lobby.pasteReply": "Paste the reply code from your friend",
+  "lobby.connectDevice": "Connect device",
+  "lobby.yourName": "Your name",
+  "lobby.replyCode": "Reply code",
+  "lobby.onlineConnected": "Connected over the internet (peer-to-peer).",
+  "lobby.noTurnNote": "If a player can't connect, their network may need a TURN relay (not supported). Most networks work over STUN.",
+  "online.title": "Join Online Game",
+  "online.invitePrompt": "Paste the invite code the host sent you",
+  "online.generateReply": "Generate reply",
+  "online.replyReady": "Send this reply code back to the host:",
+  "online.waitingHost": "Waiting for the host to connect…",
+  "online.connected": "Connected — entering the lobby…",
+  "online.connectFailed": "Connection failed. A strict NAT may block direct peer-to-peer.",
+  "online.badCode": "That invite code isn't valid.",
+  "online.hint": "Online play is peer-to-peer: paste the host's invite, send back the reply code it produces, and you'll connect directly — no server.",
+  "online.copyReply": "Copy reply",
 };
 
 const ru: Dict = {
@@ -570,6 +596,32 @@ const ru: Dict = {
   "stats.unitsLost": "Потеряно юнитов",
   "stats.buildingsDestroyed": "Уничтожено зданий",
   "stats.time": "Время матча",
+
+  "menu.joinOnline": "Онлайн-игра",
+  "lobby.modeLocal": "Локально (это устройство)",
+  "lobby.modeOnline": "Онлайн (пригласить друга)",
+  "lobby.localNote": "Одиночная игра, разделённый экран и игра против ИИ работают на этом устройстве. Переключитесь на «Онлайн», чтобы пригласить друга через интернет — без host.bat и без сервера.",
+  "lobby.onlineHostHint": "Создайте приглашение и отправьте другу, затем вставьте ответный код, который он пришлёт.",
+  "lobby.inviteCode": "Код приглашения",
+  "lobby.createInvite": "Создать приглашение",
+  "lobby.newInvite": "Новое приглашение",
+  "lobby.generating": "Создание…",
+  "lobby.pasteReply": "Вставьте ответный код от друга",
+  "lobby.connectDevice": "Подключить устройство",
+  "lobby.yourName": "Ваше имя",
+  "lobby.replyCode": "Ответный код",
+  "lobby.onlineConnected": "Подключено через интернет (peer-to-peer).",
+  "lobby.noTurnNote": "Если игрок не может подключиться, его сети может требоваться TURN-ретранслятор (не поддерживается). Большинство сетей работают через STUN.",
+  "online.title": "Онлайн-игра",
+  "online.invitePrompt": "Вставьте код приглашения, присланный хостом",
+  "online.generateReply": "Создать ответ",
+  "online.replyReady": "Отправьте этот ответный код обратно хосту:",
+  "online.waitingHost": "Ожидание подключения хоста…",
+  "online.connected": "Подключено — вход в лобби…",
+  "online.connectFailed": "Не удалось подключиться. Строгий NAT может блокировать прямое соединение.",
+  "online.badCode": "Этот код приглашения недействителен.",
+  "online.hint": "Онлайн-игра работает peer-to-peer: вставьте приглашение хоста, отправьте обратно созданный ответный код — и вы подключитесь напрямую, без сервера.",
+  "online.copyReply": "Копировать ответ",
 };
 
 const uz: Dict = {
@@ -854,6 +906,32 @@ const uz: Dict = {
   "stats.unitsLost": "Yoʻqotilgan birliklar",
   "stats.buildingsDestroyed": "Vayron qilingan binolar",
   "stats.time": "Oʻyin vaqti",
+
+  "menu.joinOnline": "Onlayn oʻyinga qoʻshilish",
+  "lobby.modeLocal": "Lokal (shu qurilma)",
+  "lobby.modeOnline": "Onlayn (doʻstni taklif qilish)",
+  "lobby.localNote": "Yakka oʻyin, boʻlingan ekran va AI ga qarshi oʻyin shu qurilmada ishlaydi. Doʻstingizni internet orqali taklif qilish uchun «Onlayn» ga oʻting — host.bat ham, server ham kerak emas.",
+  "lobby.onlineHostHint": "Taklif yarating va doʻstingizga yuboring, soʻng u qaytargan javob kodini joylashtiring.",
+  "lobby.inviteCode": "Taklif kodi",
+  "lobby.createInvite": "Taklif yaratish",
+  "lobby.newInvite": "Yangi taklif",
+  "lobby.generating": "Yaratilmoqda…",
+  "lobby.pasteReply": "Doʻstingizdan kelgan javob kodini joylashtiring",
+  "lobby.connectDevice": "Qurilmani ulash",
+  "lobby.yourName": "Ismingiz",
+  "lobby.replyCode": "Javob kodi",
+  "lobby.onlineConnected": "Internet orqali ulandi (peer-to-peer).",
+  "lobby.noTurnNote": "Agar oʻyinchi ulana olmasa, uning tarmogʻiga TURN rele kerak boʻlishi mumkin (qoʻllab-quvvatlanmaydi). Koʻp tarmoqlar STUN orqali ishlaydi.",
+  "online.title": "Onlayn oʻyinga qoʻshilish",
+  "online.invitePrompt": "Xost yuborgan taklif kodini joylashtiring",
+  "online.generateReply": "Javob yaratish",
+  "online.replyReady": "Ushbu javob kodini xostga qaytaring:",
+  "online.waitingHost": "Xost ulanishi kutilmoqda…",
+  "online.connected": "Ulandi — lobbiga kirilmoqda…",
+  "online.connectFailed": "Ulanib boʻlmadi. Qatʼiy NAT toʻgʻridan-toʻgʻri ulanishni bloklashi mumkin.",
+  "online.badCode": "Bu taklif kodi notoʻgʻri.",
+  "online.hint": "Onlayn oʻyin peer-to-peer ishlaydi: xostning taklifini joylashtiring, hosil boʻlgan javob kodini qaytaring — va siz serversiz toʻgʻridan-toʻgʻri ulanasiz.",
+  "online.copyReply": "Javobni nusxalash",
 };
 
 const LOCALES: Record<Lang, Dict> = { en, ru, uz };
@@ -894,4 +972,15 @@ export function localeParity(): string[] {
     if (!(k in uz)) missing.push(`uz:${k}`);
   }
   return missing;
+}
+
+// Player display name, persisted to localStorage("mys.name"). defaultName() is read everywhere a
+// name is needed (lobby, hello); setDefaultName() is the writer the editable name field uses so the
+// chosen name survives across sessions (spec §24 T33-D1). Both guard against a missing localStorage
+// (headless test / privacy mode) so they are safe to call anywhere.
+export function defaultName(): string {
+  try { return localStorage.getItem("mys.name") || "Player"; } catch { return "Player"; }
+}
+export function setDefaultName(name: string): void {
+  try { localStorage.setItem("mys.name", name); } catch { /* ignore */ }
 }

@@ -1,13 +1,16 @@
 // MYS Generals — application entry. Boots the menu/lobby and launches matches on the
 // authoritative-host architecture (spec §3.2). Local matches (single-player, split-screen) run a
-// MatchHost in-page via LoopbackTransport; LAN matches connect a SocketTransport to a Node host —
+// MatchHost in-page via LoopbackTransport; LAN matches connect a SocketTransport to a Node host;
+// ONLINE matches (T33) connect a WebRTCTransport (joiner) or run an in-browser GameHost (host) —
 // the simulation path is identical, only the transport differs.
-import { initLang } from "./i18n.js";
+import { initLang, defaultName } from "./i18n.js";
 import { Menu, JoinUI } from "./ui/menu.js";
 import { AudioManager } from "./render/audio.js";
 import { MatchSession } from "./client/session.js";
 import { RemoteSession } from "./client/remoteSession.js";
 import { SocketTransport } from "./net/socketTransport.js";
+import { ClientTransport } from "./net/transport.js";
+import { ServerMsg } from "./net/protocol.js";
 
 // Marker injected by the Node host (dist/server/host.js) into the served HTML. When present we know
 // the page came from a real LAN host, so we auto-connect instead of showing the title menu. Pages
@@ -31,10 +34,16 @@ function clearSessions(): void {
   session?.stop(); session = null;
   remote?.stop(); remote = null;
   if (transport) { transport.close(); transport = null; }
+  menu.teardownOnline();
 }
 
-function defaultName(): string {
-  try { return localStorage.getItem("mys.name") || "Player"; } catch { return "Player"; }
+// Enter a match as a thin client of any host (LAN socket, online WebRTC, or the in-browser host's
+// own loopback player) — the RemoteSession only renders snapshots + sends commands (spec §3.2).
+function enterRemoteMatch(t: ClientTransport, startMsg: Extract<ServerMsg, { m: "start" }>): void {
+  remote?.stop();
+  remote = new RemoteSession(canvas, overlay, audio, t, startMsg);
+  remote.start();
+  remote.onQuit = () => { clearSessions(); menu.showTitle(); };
 }
 
 // Connect a SocketTransport to a hosted game and drive the lobby → match flow. Shared by manual
@@ -49,13 +58,8 @@ function connect(rawUrl: string, name: string, ui: JoinUI): void {
   ui.setStatus("join.connectingHost");
   transport = new SocketTransport(base, name, {
     onWelcome: (_playerId, _token) => { ui.setStatus("join.connectingHost"); },
-    onLobby: (state) => { if (transport) menu.showRemoteLobby(state, transport); },
-    onStart: (startMsg) => {
-      if (!transport) return;
-      remote = new RemoteSession(canvas, overlay, audio, transport, startMsg);
-      remote.start();
-      remote.onQuit = () => { clearSessions(); menu.showTitle(); };
-    },
+    onLobby: (state) => { if (transport) menu.showRemoteLobby(state, transport, "lan"); },
+    onStart: (startMsg) => { if (transport) enterRemoteMatch(transport, startMsg); },
     onError: (_reason, key) => { ui.setStatus(key || "join.failed", true); },
     onHostGone: () => { clearSessions(); menu.showTitle(); },
     onStateChange: (_s) => { /* tracked internally */ },
@@ -70,7 +74,19 @@ const menu = new Menu(overlay, {
     session.start(cfg);
   },
   onJoin: (opts, ui) => { connect(opts.url, opts.name, ui); },
+  // Online (WebRTC P2P) and the in-browser host's own player both reach the match here.
+  onRemoteMatch: (t, startMsg) => { enterRemoteMatch(t, startMsg); },
 });
+
+// A page opened with a `#join=<code>` fragment (a shared online invite) jumps straight to the Join
+// Online screen with the invite pre-filled (spec §24 T33-C2).
+function maybeJoinFragment(): boolean {
+  const hash = window.location.hash || "";
+  const m = hash.match(/[#&]join=([^#&]+)/);
+  if (!m) return false;
+  menu.showJoinOnline(decodeURIComponent(m[1]));
+  return true;
+}
 
 // If this page was opened from a host's shared link/QR (carries ?room=) or was served by the Node
 // host itself, skip the title menu and connect straight to the lobby. window.location.origin is the
@@ -95,4 +111,4 @@ function maybeAutoJoin(): boolean {
   return true;
 }
 
-if (!maybeAutoJoin()) menu.showTitle();
+if (!maybeJoinFragment() && !maybeAutoJoin()) menu.showTitle();

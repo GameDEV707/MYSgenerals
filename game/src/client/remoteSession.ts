@@ -10,14 +10,14 @@ import { FxRenderer } from "../render/fx.js";
 import { AudioManager, SoundId } from "../render/audio.js";
 import { InputController } from "../input.js";
 import { HUD } from "../ui/hud.js";
-import { SocketTransport } from "../net/socketTransport.js";
+import { ClientTransport } from "../net/transport.js";
 import { ServerMsg } from "../net/protocol.js";
 
 export class RemoteSession {
   private canvas: HTMLCanvasElement;
   private overlay: HTMLElement;
   private audio: AudioManager;
-  private transport: SocketTransport;
+  private transport: ClientTransport;
   private startMsg: Extract<ServerMsg, { m: "start" }>;
   private view!: WorldView;
   private fx!: FxRenderer;
@@ -32,7 +32,7 @@ export class RemoteSession {
 
   constructor(
     canvas: HTMLCanvasElement, overlay: HTMLElement, audio: AudioManager,
-    transport: SocketTransport, startMsg: Extract<ServerMsg, { m: "start" }>
+    transport: ClientTransport, startMsg: Extract<ServerMsg, { m: "start" }>
   ) {
     this.canvas = canvas; this.overlay = overlay; this.audio = audio;
     this.transport = transport; this.startMsg = startMsg;

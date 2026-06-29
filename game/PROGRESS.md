@@ -1400,3 +1400,136 @@ suites pass: the prior twenty-six plus three new T32 suites — `maps`, `outpost
 **[OPT] deferred:** outposts give **no passive income** (they are defensive sub-bases, not mines — income
 still comes from mines and oil derricks); the AI's early hero derrick-grab is best-effort (it prioritises
 the closer outpost sub-bases). No required T32 scope item is dropped.
+
+
+
+---
+
+## T33 — Online play over the internet via serverless WebRTC P2P, a Local/Online host toggle, invite/reply codes & per-player editable names  *(browser-hosted internet multiplayer)*
+
+> Source of truth: `../MYSgenerals.md` §24 → T33. **Transport-layer addition only.** The authoritative
+> simulation (§3.2), the `Command`/event pipeline, the `ClientMsg`/`ServerMsg` protocol envelopes, the
+> lobby model and the snapshot/fog code are **unchanged** — T33 adds a new browser-hosted, peer-to-peer
+> **WebRTC** path and reuses the existing host-side message loop, so single-player, split-screen (T24)
+> and the LAN Node host (T25) all keep working exactly as before.
+
+**Goal (restated):** the game must be playable **online** over the internet **without running
+`host.bat`/`host.sh` and without any server we operate**. In the lobby's Connection panel there is a
+**Local / Online** toggle; the person opening the game adds slots and, on **Online**, an **invite code**
+is generated automatically and handed to the joining player, who enters it to join (the joiner returns a
+**reply code** the host applies). **Local** host works the same way with **no launcher**. Finally,
+**every player can edit their own name**.
+
+**Chosen approach — serverless WebRTC P2P (per the spec, no broker/server):** gameplay is pure
+peer-to-peer over a reliable, ordered `RTCDataChannel` using only **free public STUN** for NAT discovery;
+**the host runs in the browser** (it already runs `Lobby` + `MatchHost`), and signaling is a **two-step,
+non-trickle** code exchange (invite → reply). **TURN is out of scope** (a server we'd operate); strict/
+symmetric NAT (~10–20%) may fail without it — documented & deferred.
+
+### Scope checklist (T33)
+- [x] Host-side logic extracted into a **DOM/Node-agnostic `GameHost`**; the Node WebSocket host (LAN,
+      T25) is **re-homed onto it with zero behaviour change**.
+- [x] A **`WebRTCTransport`** implements the existing client transport + lobby-callback surface over a
+      reliable `RTCDataChannel` using the **same `ClientMsg`/`ServerMsg`** envelopes.
+- [x] A **browser host endpoint** (`BrowserHost`) runs `Lobby` + `MatchHost` in the tab, attaches **2–4**
+      WebRTC peers (host itself via an in-page `LoopbackPeerTransport`), and handles peer disconnect —
+      **no `host.bat` required**.
+- [x] **Serverless STUN-only signaling**: the host generates an **invite code** (Copy / `#join=` URL), the
+      joiner produces a **reply code**, the host applies it and the channel opens — **no server we run**.
+- [x] The lobby **Connection** panel has a **Local / Online** toggle (the "run host.bat" note is gone);
+      **Local** works with **no launcher**, **Online** shows invite + paste-reply + a live connected-devices list.
+- [x] A **Join Online** menu entry + **`#join=` auto-prefill** lets a friend paste an invite and join.
+- [x] **Every player can edit their own name** in the lobby (`setName` reflected to all; persisted to
+      `localStorage("mys.name")`).
+- [x] New strings are **trilingual** (uz/ru/en, correct Uzbek orthography U+02BB/U+02BC); `localeParity()` passes.
+- [x] **Headless tests** cover `GameHost` (mock peer sink), the signaling codec, name editing and the mode
+      toggle; the **real WebRTC connection is documented as user-verified**; `bash build.sh` is clean and
+      every suite is green.
+- [x] **No regression:** single-player, split-screen (T24) and the LAN Node host (T25) all behave as before.
+
+### Implementation summary
+- **`src/host/gameHost.ts` (new):** the host message loop extracted from `src/server/host.ts` into a
+  reusable, engine/DOM/Node-agnostic **`GameHost`** that talks to an abstract **`HostPeerSink`** (send a
+  `ServerMsg` to peer N / disconnect peer N) and is fed bytes via `onPeerMessage(peerId, raw)` (or
+  `onPeerMessageObject` for the no-JSON loopback path). It owns the `Lobby` + `MatchHost`, claims the
+  reserved **host slot 0** for the loopback peer, handles `hello`/`cmd`/`lobby`/`ping`, reconnection grace
+  tokens, the 20 Hz tick + per-player **fog-filtered** snapshots/events, and graceful `shutdown()` —
+  **byte-identical** `ServerMsg` behaviour to the old inline loop. A read-only `match` getter is the test
+  seam.
+- **`src/server/host.ts` (re-homed):** now a **thin LAN driver** — it accepts RFC-6455 sockets, forwards
+  their frames into `GameHost.onPeerMessage`, and implements `HostPeerSink` by framing `ServerMsg`s back
+  over the sockets (`conns` map). Static serving, the `window.__MYS_HOST__` injection and the QR/room-code
+  console output are unchanged. The LAN path is unchanged behaviour (T25 suites stay green).
+- **`src/net/signal.ts` (new):** pure, dependency-free **invite/reply codec** — `{t, sdp, ice?}` → JSON →
+  UTF-8 → URL-safe base64 (manual base64 + `TextEncoder`, so it runs identically in the browser and the
+  headless Node runner). The decoder is tolerant of whitespace, line-wrapping, the standard base64
+  alphabet and `#join=<code>` URL fragments, and returns `null` (never throws) on malformed input.
+- **`src/net/webrtcTransport.ts` (new, browser-only):** **`WebRTCTransport`** implements the same
+  `LobbyClient` + `RemoteClientCallbacks` surface as `SocketTransport` but over an `RTCDataChannel`
+  carrying the identical envelopes; plus **`joinOnline(invite, name, cb)`** — the joiner's answerer
+  signaling (apply offer → create answer → gather ICE to completion → produce the reply code), STUN-only
+  `RTC_CONFIG`, and a `gatherComplete()` helper with a safety timeout.
+- **`src/net/webrtcHost.ts` (new, browser-only):** **`BrowserHost`** wires a `GameHost` to WebRTC — one
+  `RTCPeerConnection` (offerer) per joiner, `createInvite()` / `applyReply()`, and a `HostPeerSink` that
+  JSON-frames to each open data channel. The host's own player is a **`LoopbackPeerTransport`** (the
+  spec's "host via LoopbackTransport", extended to speak the full lobby protocol so the host uses the very
+  same lobby UI + `RemoteSession` path as every joiner — snapshots delivered as objects, no serialization).
+- **`src/net/transport.ts`:** added the shared **`LobbyClient`** (transport + `sendLobbyAction`) and
+  **`RemoteClientCallbacks`** interfaces so the menu/lobby UI and `RemoteSession` have one code path for
+  every transport (socket / WebRTC / loopback). `RemoteSession` now takes a `ClientTransport`.
+- **`src/ui/lobbyMode.ts` (new):** pure, DOM-free **`LobbyMode`** predicates (`showInvitePanel`,
+  `showLocalNote`, `showLanInfo`, `isHostMode`, `hostModeFor`) so the toggle behaviour is unit-testable.
+- **`src/ui/menu.ts`:** the host lobby Connection panel gains the **Local/Online toggle** (the long
+  host.bat note → a short `lobby.localNote`); flipping to **Online** stands up a `BrowserHost` and routes
+  the host (slot 0) into the shared remote-lobby UI with an **invite/reply panel** (create invite → Copy →
+  paste the joiner's reply → Connect device) + a live **Connected devices** list. `showRemoteLobby` now
+  takes a `LobbyMode` (`lan` / `online-host` / `online-guest`) and renders the right Connection panel. A
+  **Join Online** Play-menu entry + **`showJoinOnline(prefill)`** lets a friend paste an invite, produce a
+  reply code, and drop into the lobby. Every player's slot shows an **editable name field** → `setName`
+  (reflected to all) + `setDefaultName` persistence.
+- **`src/main.ts`:** `onRemoteMatch(transport, startMsg)` enters a `RemoteSession` for any transport; a
+  **`#join=<code>`** fragment auto-opens Join Online pre-filled; `clearSessions()` tears down the online
+  host/joiner.
+- **`src/i18n.ts`:** **`defaultName()`/`setDefaultName()`** helpers (the missing writer for
+  `localStorage("mys.name")`) + all new online/lobby strings in **en/ru/uz** (Uzbek U+02BB/U+02BC).
+- **`styles.css`:** styling for the Local/Online toggle, the paste-able code boxes and the invite panel.
+
+### How each DoD line was verified
+**Quality gate.** `bash build.sh` compiles `tsconfig.json` + `tsconfig.server.json` with **zero TS
+errors**. **Thirty-two** suites pass: the prior twenty-nine plus three new T33 suites — **`gamehost`**,
+**`signal`**, **`online`**.
+
+- **`GameHost` over a mock peer sink (transport-agnostic proof).** `test/gamehost.mjs` drives `GameHost`
+  with an in-memory sink (no sockets/WebRTC): the loopback peer claims **slot 0**, a joiner takes **slot
+  1**, the broadcast lobby **strips tokens**, **`setName` reflects** to the lobby, both ready → the host
+  starts, both receive `start` (`you` 0/1), and the primed **snapshots are fog-filtered** (each player's
+  snapshot has **zero** enemy entities and **no economy leak**). **Command ownership** is enforced (player
+  1 cannot move a player-0 unit; a spoofed `owner=0` build is coerced to the authenticated player 1) —
+  mirroring `test/host.mjs`/`test/net.mjs`. `shutdown()` broadcasts `hostgone`.
+- **Signaling codec round-trip.** `test/signal.mjs` proves invite (offer) and reply (answer) blobs
+  **encode→decode byte-identically** (multi-line SDP preserved), the optional `ice[]` round-trips, and the
+  decoder tolerates whitespace / line-wrapping / a `#join=<code>` URL fragment while **rejecting**
+  empty/garbage/non-signal input (returns `null`, never throws).
+- **Editable name + persistence.** `test/online.mjs` proves `setDefaultName()` writes
+  `localStorage("mys.name")` and `defaultName()` reads it back (survives a reload; a Cyrillic name
+  round-trips), and `test/gamehost.mjs` proves the `setName` lobby action **reflects to the broadcast
+  lobby state** seen by all peers.
+- **Local/Online toggle predicate.** `test/online.mjs` asserts the pure `lobbyMode` predicates
+  (`showInvitePanel`/`showLocalNote`/`showLanInfo`/`isHostMode`/`hostModeFor`) for every mode.
+- **Trilingual + parity.** All new strings go through `t()` in en/ru/uz with correct Uzbek orthography;
+  `test/smoke.mjs`'s `localeParity()` (fails if any key is missing in any locale) passes.
+- **Live WebRTC leg — user-verified (be explicit).** The sandbox is `INTEGRATIONS_ONLY` (no outbound
+  internet) and the headless runner has **no `RTCPeerConnection`**, so the **real peer-to-peer connection
+  is browser-/internet-only and is verified manually by the design owner** on real devices: host picks
+  **Online** → copies the invite → friend (different network) pastes it on **Join Online**, sends back the
+  reply → channel opens → match runs P2P. Everything transport-agnostic (above) is covered headlessly.
+- **No regression.** The sim/protocol/lobby/snapshot code is untouched; the LAN host is re-homed onto the
+  same `GameHost` with no behaviour change — `smoke, net, host, lobby, lan, input, hudlayout, stress,
+  split, keybindings, kbinput, production, research, visuals, keyboard, catnav, overlay, power, zoom,
+  heropanel, mineeta, placement, basetech, upgrades, minework, workers, maps, outpost, minefind` all stay
+  green.
+
+**[OPT] deferred:** **TURN relay** for strict/symmetric NAT (it would be a server we operate) — STUN-only
+covers the common case and the limitation is documented in-lobby (`lobby.noTurnNote`) and the README; an
+optional free-TURN fallback may be added later. Combining **online and split-screen in one match** is out
+of scope (online is the P2P path, split-screen the local loopback path). No required T33 scope item is dropped.

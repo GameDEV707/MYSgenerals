@@ -3,7 +3,7 @@
 // (single-player and split-screen); SocketTransport (src/net/socketTransport.ts) is used for
 // LAN clients. Both implement the same ClientTransport interface, so the simulation has
 // exactly one code path.
-import { Command, GameEvent, Snapshot, WireCommand } from "./protocol.js";
+import { Command, GameEvent, Snapshot, WireCommand, LobbyState, LobbyAction, ServerMsg } from "./protocol.js";
 
 // Client-facing side of the transport.
 export interface ClientTransport {
@@ -12,6 +12,27 @@ export interface ClientTransport {
   onSnapshot(cb: (s: Snapshot) => void): void;
   onEvent(cb: (e: GameEvent) => void): void;
   close(): void;
+}
+
+// The lobby-aware client surface shared by every networked transport (SocketTransport — LAN,
+// WebRTCTransport — online P2P, and LoopbackPeerTransport — the browser host's own player). All
+// three speak the same ClientMsg/ServerMsg envelopes, so the menu/lobby UI and RemoteSession have
+// exactly one code path regardless of the underlying transport (spec §20.2 / §24 T33).
+export interface LobbyClient extends ClientTransport {
+  sendLobbyAction(action: LobbyAction): void;
+}
+
+// Callback surface a lobby-aware transport raises as the connection progresses. SocketTransport,
+// WebRTCTransport and LoopbackPeerTransport all drive these identically (spec §24 T33-B1).
+export interface RemoteClientCallbacks {
+  onWelcome?: (playerId: number, token: string) => void;
+  onLobby?: (state: LobbyState) => void;
+  onStart?: (msg: Extract<ServerMsg, { m: "start" }>) => void;
+  onError?: (reason: string, key?: string) => void;
+  onHostGone?: () => void;
+  onStateChange?: (state: string) => void;
+  onPong?: (rtt: number) => void;
+  onReconnected?: () => void;
 }
 
 // Host-facing side: where the host pushes per-player snapshots/events.

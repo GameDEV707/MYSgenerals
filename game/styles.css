@@ -375,3 +375,17 @@ select, input {
 }
 .kb-key.capturing { border-color: var(--accent); color: var(--accent); animation: pulse 1s infinite; }
 @media (max-width: 560px) { .kb-rows { grid-template-columns: 1fr; } }
+
+
+
+/* ---------------- Online play (serverless WebRTC P2P, spec §24 → T33) ---------------- */
+.conn-toggle { display: flex; gap: 6px; margin-bottom: 8px; }
+.conn-toggle .btn.active { background: var(--accent); color: #06101c; border-color: var(--accent); }
+.invite-box { display: flex; flex-direction: column; gap: 6px; }
+.invite-box label { font-size: 11px; color: var(--accent-2); text-transform: uppercase; letter-spacing: 1px; }
+.codebox {
+  width: 100%; box-sizing: border-box; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 1.35; color: var(--text); background: #06101c;
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; word-break: break-all;
+}
+.codebox[readonly] { color: var(--accent-2); }

@@ -1,11 +1,15 @@
-// MYS Generals — main menu & lobby flow (spec §18.1–§18.3).
-import { t, setLang, getLang, onLangChange, Lang } from "../i18n.js";
+// MYS Generals — main menu & lobby flow (spec §18.1–§18.3, §24 T33).
+import { t, setLang, getLang, onLangChange, Lang, defaultName, setDefaultName } from "../i18n.js";
 import { Lobby, PALETTE } from "../host/lobby.js";
 import { SessionConfig, SessionPlayer, LocalSpec, Difficulty } from "../client/session.js";
 import { getMap, MAP_IDS } from "../sim/map.js";
 import { qrMatrix } from "../net/qr.js";
-import { LobbyState } from "../net/protocol.js";
+import { LobbyState, ServerMsg } from "../net/protocol.js";
 import { SocketTransport } from "../net/socketTransport.js";
+import { ClientTransport, LobbyClient, RemoteClientCallbacks } from "../net/transport.js";
+import { BrowserHost, PendingInvite } from "../net/webrtcHost.js";
+import { joinOnline, WebRTCTransport } from "../net/webrtcTransport.js";
+import { LobbyMode, showInvitePanel, showLanInfo } from "./lobbyMode.js";
 import { SplitInputConfig, PointerDevice, loadSplitInput, saveSplitInput, resolveSplitInput, hasTouch } from "../client/splitInput.js";
 import { ACTION_DEFS, getKeyBindings, keyLabel, setBinding, resetKeyBindings, normalizeKey, BindContext } from "./keyBindings.js";
 
@@ -13,6 +17,10 @@ export interface JoinUI { setStatus: (key: string, isError?: boolean) => void; }
 export interface MenuCallbacks {
   onStartLocal: (cfg: SessionConfig) => void;
   onJoin: (opts: { url: string; name: string }, ui: JoinUI) => void;
+  // Enter a match as a thin client of a remote/online host (LAN, WebRTC P2P, or the in-browser
+  // host's own loopback player). main.ts owns the RemoteSession; the menu just hands it a connected
+  // transport + the start message (spec §24 T33).
+  onRemoteMatch?: (transport: ClientTransport, startMsg: Extract<ServerMsg, { m: "start" }>) => void;
 }
 
 const MAPS = MAP_IDS;
@@ -22,6 +30,11 @@ export class Menu {
   cb: MenuCallbacks;
   private lobby: Lobby | null = null;
   private splitInput: SplitInputConfig = loadSplitInput();
+  // T33 online state: the in-browser host (when this device hosts Online) and the active
+  // lobby-aware transport (host's own loopback player, a WebRTC joiner, or a LAN socket).
+  private browserHost: BrowserHost | null = null;
+  private pendingInvite: PendingInvite | null = null;
+  private joinPc: RTCPeerConnection | null = null;
 
   constructor(root: HTMLElement, cb: MenuCallbacks) {
     this.root = root; this.cb = cb;
@@ -68,12 +81,14 @@ export class Menu {
         <h2>${t("menu.play")}</h2>
         <button class="btn primary" data-id="p-single">${t("menu.singlePlayer")}</button>
         <button class="btn" data-id="p-host">${t("menu.hostGame")}</button>
+        <button class="btn" data-id="p-joinonline">${t("menu.joinOnline")}</button>
         <button class="btn" data-id="p-join">${t("menu.joinGame")}</button>
         <button class="btn" data-id="p-back">${t("menu.back")}</button>
       </div></div>`);
     this.root.appendChild(scr); this.wireLang(scr);
     (scr.querySelector("[data-id=p-single]") as HTMLElement).onclick = () => this.showSetup();
     (scr.querySelector("[data-id=p-host]") as HTMLElement).onclick = () => this.showLobby();
+    (scr.querySelector("[data-id=p-joinonline]") as HTMLElement).onclick = () => this.showJoinOnline();
     (scr.querySelector("[data-id=p-join]") as HTMLElement).onclick = () => this.showJoin();
     (scr.querySelector("[data-id=p-back]") as HTMLElement).onclick = () => this.showTitle();
   }
@@ -165,7 +180,9 @@ export class Menu {
           </div>
           <div class="lobby-conn">
             <h4>${t("lobby.connection")}</h4>
-            <div class="dim lan-note">${t("lobby.localOnlyNote")}</div>
+            ${this.connToggleHtml(false)}
+            <div class="field" style="margin-top:8px"><label>${t("lobby.yourName")}</label><input data-id="l-name" maxlength="20" value="${this.escAttr(st.slots[0]?.name && st.slots[0].name !== "Host" ? st.slots[0].name : defaultName())}"/></div>
+            <div class="dim lan-note">${t("lobby.localNote")}</div>
             <div class="devices"><h4>${t("lobby.devices")}</h4><div data-id="l-devices">${this.devicesHtml()}</div></div>
           </div>
         </div>
@@ -178,6 +195,15 @@ export class Menu {
     (scr.querySelector("[data-id=l-addai]") as HTMLElement).onclick = () => lobby.addAI("normal");
     (scr.querySelector("[data-id=l-back]") as HTMLElement).onclick = () => { this.lobby = null; this.showPlayMenu(); };
     (scr.querySelector("[data-id=l-start]") as HTMLElement).onclick = () => this.startLobby();
+    // Editable host name (persisted → defaultName for next session and for online/LAN slots).
+    const nameInput = scr.querySelector("[data-id=l-name]") as HTMLInputElement | null;
+    if (nameInput) nameInput.onchange = () => { const v = nameInput.value.trim() || "Host"; lobby.setName(0, v); setDefaultName(v); };
+    // Local/Online toggle: flipping to Online tears down the local lobby and starts the in-browser
+    // P2P host (spec §24 T33-C1).
+    (scr.querySelector("[data-id=ct-online]") as HTMLElement | null)?.addEventListener("click", () => {
+      const v = nameInput?.value.trim(); if (v) setDefaultName(v);
+      this.startOnlineHost();
+    });
     // slot controls
     scr.querySelectorAll<HTMLElement>("[data-slot-act]").forEach((b) => {
       b.onclick = () => {
@@ -426,14 +452,16 @@ export class Menu {
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (m[r][c]) ctx.fillRect(off + (c + quiet) * px, off + (r + quiet) * px, px, px);
   }
 
-  // ---------- Remote lobby (client joined a hosted game via SocketTransport) ----------
-  private remoteTransport: SocketTransport | null = null;
+  // ---------- Remote lobby (joined a hosted game: LAN socket / online WebRTC / host loopback) ----------
+  private remoteTransport: LobbyClient | null = null;
   private remoteSlot = -1;
+  private lobbyMode: LobbyMode = "lan";
 
-  showRemoteLobby(state: LobbyState, transport: SocketTransport): void {
+  showRemoteLobby(state: LobbyState, transport: LobbyClient, mode: LobbyMode = "lan"): void {
     this.remoteTransport = transport;
+    this.lobbyMode = mode;
     this.root.innerHTML = "";
-    // Our slot is whatever the server assigned at welcome (slot 0 = the host's own browser).
+    // Our slot is whatever the host assigned at welcome (slot 0 = the host's own player).
     this.remoteSlot = transport.playerId;
     const isHost = this.remoteSlot === 0;
     const mySlot = this.remoteSlot >= 0 ? state.slots[this.remoteSlot] : undefined;
@@ -468,42 +496,45 @@ export class Menu {
               <div class="mapdesc">${t("lobby.mapDesc." + state.map)}</div>
             </div>
             <div class="slots" data-id="rl-slots">${state.slots.map((s) => this.remoteSlotHtml(s, isHost)).join("")}</div>
+            ${mySlot && mySlot.kind === "human" ? `<div class="field" style="margin-top:8px"><label>${t("lobby.yourName")}</label><input data-id="rl-name" maxlength="20" value="${this.escAttr(mySlot.name)}"/></div>` : ""}
             ${isHost ? hostControls : guestControls}
           </div>
           <div class="lobby-conn">
             <h4>${t("lobby.connection")}</h4>
-            <div class="lan-url"><span class="badge">${t("lobby.roomCode")}: ${state.roomCode}</span></div>
-            <div class="join-url"><label>${t("lobby.joinUrl")}</label>
-              <div class="url-row"><code data-id="rl-url">${joinUrl}</code><button class="btn tiny" data-id="rl-copy">${t("lobby.copy")}</button></div>
-            </div>
-            <canvas data-id="rl-qr" width="168" height="168" class="qr"></canvas>
-            <div class="dim" style="font-size:11px">${t("lobby.scan")}</div>
-            <div class="lan-note dim" style="margin-top:10px;font-size:12px;line-height:1.5">
-              <div>📶 ${t("lobby.sameWifi")}</div>
-              <div>🔗 ${t("lobby.useLanLink")}</div>
-              <div>🛡️ ${t("lobby.firewallNote")}</div>
-            </div>
+            ${this.connPanelHtml(state, mode, joinUrl)}
           </div>
         </div>
       </div></div>`);
     this.root.appendChild(scr); this.wireLang(scr);
 
-    // QR of the LAN join URL (so other devices can scan it straight off the host screen).
-    const qc = scr.querySelector("[data-id=rl-qr]") as HTMLCanvasElement | null;
-    if (qc) this.renderQR(qc, joinUrl);
+    // QR + copy of the LAN join URL (LAN host path only).
+    if (showLanInfo(mode)) {
+      const qc = scr.querySelector("[data-id=rl-qr]") as HTMLCanvasElement | null;
+      if (qc) this.renderQR(qc, joinUrl);
+      const copyBtn = scr.querySelector("[data-id=rl-copy]") as HTMLElement | null;
+      if (copyBtn) copyBtn.onclick = () => {
+        navigator.clipboard?.writeText(joinUrl)
+          .then(() => { copyBtn.textContent = t("lobby.copied"); setTimeout(() => { copyBtn.textContent = t("lobby.copy"); }, 1500); })
+          .catch(() => { /* clipboard may be unavailable over plain http */ });
+      };
+    }
 
-    // Copy link to clipboard.
-    const copyBtn = scr.querySelector("[data-id=rl-copy]") as HTMLElement | null;
-    if (copyBtn) copyBtn.onclick = () => {
-      navigator.clipboard?.writeText(joinUrl)
-        .then(() => { copyBtn.textContent = t("lobby.copied"); setTimeout(() => { copyBtn.textContent = t("lobby.copy"); }, 1500); })
-        .catch(() => { /* clipboard may be unavailable over plain http */ });
+    // Editable name → reflect to all peers + persist for next session (spec §24 T33-D1).
+    const nameInput = scr.querySelector("[data-id=rl-name]") as HTMLInputElement | null;
+    if (nameInput) nameInput.onchange = () => {
+      const v = nameInput.value.trim() || "Player";
+      transport.sendLobbyAction({ a: "setName", name: v });
+      setDefaultName(v);
     };
 
-    // Back / leave the lobby.
+    // Online host: wire the invite/reply controls + Local toggle.
+    if (showInvitePanel(mode)) this.wireInvitePanel(scr);
+
+    // Back / leave the lobby (tear down the online host if we are it).
     (scr.querySelector("[data-id=rl-back]") as HTMLElement).onclick = () => {
       transport.close();
       this.remoteTransport = null;
+      this.teardownOnline();
       this.showPlayMenu();
     };
 
@@ -556,7 +587,7 @@ export class Menu {
     if (s.kind === "open") label = t("lobby.empty");
     else if (s.kind === "closed") label = t("lobby.closed");
     else if (s.kind === "ai") label = t("lobby.aiPlayer") + " · " + t("menu." + (s.ai || "normal"));
-    else if (s.kind === "human") label = (s.index === 0 ? t("lobby.host") : (s.name || t("lobby.human"))) + (isMe ? " (" + t("lobby.you") + ")" : "");
+    else if (s.kind === "human") label = (s.index === 0 ? (s.name && s.name !== "Host" ? s.name : t("lobby.host")) : (s.name || t("lobby.human"))) + (isMe ? " (" + t("lobby.you") + ")" : "");
     const readyBadge = s.kind === "human" ? `<span class="badge ${s.ready ? "ok" : ""}">${s.ready ? t("lobby.ready") : t("lobby.notReady")}</span>` : "";
     // Host gets per-slot management buttons — never on its own slot 0.
     let hostBtns = "";
@@ -571,6 +602,186 @@ export class Menu {
       ${colorPick}
       <span class="slot-right">${readyBadge}${hostBtns}</span>
     </div>`;
+  }
+
+  // ---------- T33 online helpers (Local/Online toggle, invite/reply, Join Online) ----------
+  private escAttr(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // The two-way Local/Online toggle shown at the top of the host Connection panel (spec §24 T33-C1).
+  private connToggleHtml(online: boolean): string {
+    return `<div class="conn-toggle row" style="gap:6px">
+      <button class="btn tiny ${online ? "" : "active"}" data-id="ct-local">${t("lobby.modeLocal")}</button>
+      <button class="btn tiny ${online ? "active" : ""}" data-id="ct-online">${t("lobby.modeOnline")}</button>
+    </div>`;
+  }
+
+  private deviceListHtml(state: LobbyState): string {
+    return state.slots.filter((s) => s.kind === "human").map((s) =>
+      `<div class="device"><span class="slot-dot" style="background:${s.color}"></span>${s.index === 0 ? t("lobby.host") : (s.name || t("lobby.human"))}</div>`).join("");
+  }
+
+  // Connection-panel content for each lobby mode (spec §24 T33-C1).
+  private connPanelHtml(state: LobbyState, mode: LobbyMode, joinUrl: string): string {
+    if (mode === "online-host") {
+      return `${this.connToggleHtml(true)}
+        <div class="dim" style="font-size:12px;margin-top:8px">${t("lobby.onlineHostHint")}</div>
+        <div class="invite-box" style="margin-top:8px">
+          <button class="btn" data-id="rl-newinvite">${t("lobby.createInvite")}</button>
+          <div data-id="rl-invitewrap" style="display:none;margin-top:8px">
+            <label>${t("lobby.inviteCode")}</label>
+            <textarea data-id="rl-invite" class="codebox" readonly rows="3"></textarea>
+            <button class="btn tiny" data-id="rl-invitecopy">${t("lobby.copy")}</button>
+            <label style="margin-top:8px;display:block">${t("lobby.pasteReply")}</label>
+            <textarea data-id="rl-reply" class="codebox" rows="3"></textarea>
+            <button class="btn tiny" data-id="rl-applyreply">${t("lobby.connectDevice")}</button>
+            <div class="status" data-id="rl-invitestatus"></div>
+          </div>
+        </div>
+        <div class="devices"><h4>${t("lobby.devices")}</h4><div data-id="rl-devices">${this.deviceListHtml(state)}</div></div>
+        <div class="dim" style="font-size:11px;margin-top:8px">${t("lobby.noTurnNote")}</div>`;
+    }
+    if (mode === "online-guest") {
+      return `<div class="dim lan-note">${t("lobby.onlineConnected")}</div>
+        <div class="devices"><h4>${t("lobby.devices")}</h4><div>${this.deviceListHtml(state)}</div></div>`;
+    }
+    // lan
+    return `<div class="lan-url"><span class="badge">${t("lobby.roomCode")}: ${state.roomCode}</span></div>
+      <div class="join-url"><label>${t("lobby.joinUrl")}</label>
+        <div class="url-row"><code data-id="rl-url">${joinUrl}</code><button class="btn tiny" data-id="rl-copy">${t("lobby.copy")}</button></div>
+      </div>
+      <canvas data-id="rl-qr" width="168" height="168" class="qr"></canvas>
+      <div class="dim" style="font-size:11px">${t("lobby.scan")}</div>
+      <div class="lan-note dim" style="margin-top:10px;font-size:12px;line-height:1.5">
+        <div>📶 ${t("lobby.sameWifi")}</div>
+        <div>🔗 ${t("lobby.useLanLink")}</div>
+        <div>🛡️ ${t("lobby.firewallNote")}</div>
+      </div>`;
+  }
+
+  // Wire the online-host invite/reply controls (one invite at a time, repeated per joiner).
+  private wireInvitePanel(scr: HTMLElement): void {
+    (scr.querySelector("[data-id=ct-local]") as HTMLElement | null)?.addEventListener("click", () => {
+      this.teardownOnline();
+      this.showLobby(); // back to the Local host lobby
+    });
+    const newBtn = scr.querySelector("[data-id=rl-newinvite]") as HTMLButtonElement | null;
+    const wrap = scr.querySelector("[data-id=rl-invitewrap]") as HTMLElement | null;
+    const inviteBox = scr.querySelector("[data-id=rl-invite]") as HTMLTextAreaElement | null;
+    const replyBox = scr.querySelector("[data-id=rl-reply]") as HTMLTextAreaElement | null;
+    const status = scr.querySelector("[data-id=rl-invitestatus]") as HTMLElement | null;
+    const setStatus = (key: string, err = false) => { if (status) { status.textContent = key ? t(key) : ""; status.className = "status" + (err ? " err" : ""); } };
+    if (newBtn) newBtn.onclick = async () => {
+      if (!this.browserHost) return;
+      newBtn.textContent = t("lobby.generating"); newBtn.disabled = true;
+      try {
+        const invite = await this.browserHost.createInvite();
+        this.pendingInvite = invite;
+        if (inviteBox) inviteBox.value = invite.code;
+        if (wrap) wrap.style.display = "";
+        setStatus("");
+      } catch { setStatus("online.connectFailed", true); }
+      finally { newBtn.textContent = t("lobby.newInvite"); newBtn.disabled = false; }
+    };
+    const copyBtn = scr.querySelector("[data-id=rl-invitecopy]") as HTMLElement | null;
+    if (copyBtn) copyBtn.onclick = () => {
+      if (!inviteBox) return;
+      navigator.clipboard?.writeText(inviteBox.value)
+        .then(() => { copyBtn.textContent = t("lobby.copied"); setTimeout(() => { copyBtn.textContent = t("lobby.copy"); }, 1500); })
+        .catch(() => { /* */ });
+    };
+    const applyBtn = scr.querySelector("[data-id=rl-applyreply]") as HTMLElement | null;
+    if (applyBtn) applyBtn.onclick = async () => {
+      if (!this.pendingInvite || !replyBox) return;
+      const code = replyBox.value.trim();
+      if (!code) { setStatus("online.badCode", true); return; }
+      try {
+        await this.pendingInvite.applyReply(code);
+        setStatus("online.connected");
+        this.pendingInvite = null;
+        replyBox.value = "";
+        if (wrap) wrap.style.display = "none";
+      } catch { setStatus("online.badCode", true); }
+    };
+  }
+
+  // Local → Online: stand up the in-browser P2P host (GameHost + WebRTC bridge) and connect the
+  // host's own player over a loopback transport, so the host uses the same lobby + match path as
+  // every joiner (slot 0), with the added invite/reply panel (spec §24 T33-B2/C1).
+  private startOnlineHost(): void {
+    this.teardownOnline();
+    this.lobby = null;
+    const cb: RemoteClientCallbacks = {
+      onLobby: (state) => { if (this.browserHost) this.showRemoteLobby(state, this.browserHost.local, "online-host"); },
+      onStart: (startMsg) => { if (this.browserHost) this.cb.onRemoteMatch?.(this.browserHost.local, startMsg); },
+      onHostGone: () => { this.teardownOnline(); this.showTitle(); },
+    };
+    this.browserHost = new BrowserHost(defaultName(), cb);
+    this.browserHost.start();
+  }
+
+  // Tear down any online host / joiner connection (called on leaving the lobby or quitting a match).
+  teardownOnline(): void {
+    if (this.browserHost) { try { this.browserHost.stop(); } catch { /* */ } this.browserHost = null; }
+    this.pendingInvite = null;
+    if (this.joinPc) { try { this.joinPc.close(); } catch { /* */ } this.joinPc = null; }
+  }
+
+  // ---------- Join Online (paste the host's invite → produce a reply → connect P2P) ----------
+  showJoinOnline(prefillInvite?: string): void {
+    this.teardownOnline();
+    this.root.innerHTML = "";
+    let name = defaultName();
+    const scr = this.el(`<div class="screen" data-screen="joinonline">
+      ${this.langSwitch()}
+      <div class="menu" style="width:540px">
+        <h2>${t("online.title")}</h2>
+        <div class="field"><label>${t("join.name")}</label><input data-id="jo-name" maxlength="20" value="${this.escAttr(name)}"/></div>
+        <div class="field"><label>${t("online.invitePrompt")}</label><textarea data-id="jo-invite" class="codebox" rows="3">${this.escAttr(prefillInvite || "")}</textarea></div>
+        <div class="dim" style="font-size:12px">${t("online.hint")}</div>
+        <div class="status" data-id="jo-status"></div>
+        <div data-id="jo-replywrap" style="display:none;margin-top:8px">
+          <label>${t("online.replyReady")}</label>
+          <textarea data-id="jo-reply" class="codebox" readonly rows="3"></textarea>
+          <button class="btn tiny" data-id="jo-replycopy">${t("online.copyReply")}</button>
+        </div>
+        <button class="btn primary" data-id="jo-generate">${t("online.generateReply")}</button>
+        <button class="btn" data-id="jo-back">${t("menu.back")}</button>
+      </div></div>`);
+    this.root.appendChild(scr); this.wireLang(scr);
+    const status = scr.querySelector("[data-id=jo-status]") as HTMLElement;
+    const setStatus = (key: string, err = false) => { status.textContent = key ? t(key) : ""; status.className = "status" + (err ? " err" : ""); };
+    (scr.querySelector("[data-id=jo-name]") as HTMLInputElement).oninput = (e) => { name = (e.target as HTMLInputElement).value; };
+    (scr.querySelector("[data-id=jo-back]") as HTMLElement).onclick = () => { this.teardownOnline(); this.showPlayMenu(); };
+    (scr.querySelector("[data-id=jo-generate]") as HTMLElement).onclick = async () => {
+      const invite = (scr.querySelector("[data-id=jo-invite]") as HTMLTextAreaElement).value.trim();
+      if (!invite) { setStatus("online.badCode", true); return; }
+      const nm = name.trim() || "Player"; setDefaultName(nm);
+      setStatus("lobby.generating");
+      let transport: WebRTCTransport | null = null;
+      const cb: RemoteClientCallbacks = {
+        onLobby: (state) => { if (transport) this.showRemoteLobby(state, transport, "online-guest"); },
+        onStart: (startMsg) => { if (transport) this.cb.onRemoteMatch?.(transport, startMsg); },
+        onError: (_r, key) => setStatus(key || "online.connectFailed", true),
+        onHostGone: () => { this.teardownOnline(); this.showTitle(); },
+      };
+      try {
+        const res = await joinOnline(invite, nm, cb);
+        transport = res.transport;
+        this.joinPc = res.pc;
+        this.remoteTransport = transport;
+        const replyWrap = scr.querySelector("[data-id=jo-replywrap]") as HTMLElement;
+        const replyBox = scr.querySelector("[data-id=jo-reply]") as HTMLTextAreaElement;
+        replyBox.value = res.replyCode;
+        replyWrap.style.display = "";
+        setStatus("online.waitingHost");
+        const rc = scr.querySelector("[data-id=jo-replycopy]") as HTMLElement;
+        rc.onclick = () => navigator.clipboard?.writeText(res.replyCode)
+          .then(() => { rc.textContent = t("lobby.copied"); setTimeout(() => { rc.textContent = t("online.copyReply"); }, 1500); })
+          .catch(() => { /* */ });
+      } catch { setStatus("online.badCode", true); }
+    };
   }
 
   // ---------- Connecting screen (shown while an auto-join / manual join is in flight) ----------

@@ -1,7 +1,11 @@
 // MYS Generals — Node LAN host server (spec §20). Zero-dependency: uses only Node built-ins
 // (http, crypto, fs, path, os, net) for WebSocket (RFC 6455) + static file serving.
-// Runs the authoritative simulation via MatchHost, broadcasts per-player fog-filtered snapshots,
-// and manages the lobby. Clients connect via raw WebSocket from a browser on the same LAN.
+//
+// As of T33 the authoritative message loop lives in the engine/DOM/Node-agnostic GameHost
+// (src/host/gameHost.ts); this file is now just the LAN DRIVER — it accepts RFC-6455 WebSocket
+// peers, forwards their bytes into GameHost, and implements GameHost's HostPeerSink by framing
+// ServerMsgs back over the sockets. The exact same GameHost also powers the in-browser online
+// host (T33), so the LAN path regresses with ZERO behaviour change.
 //
 // Usage: NODE_OPTIONS="" node dist/server/host.js [port]
 // The server prints the join URL, QR (ASCII), and room code to the terminal.
@@ -13,17 +17,9 @@ import { dirname, join, normalize, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
 
-import { World, PlayerState, Command, GameEvent } from "../sim/world.js";
-import { getMap } from "../sim/map.js";
-import { MatchHost } from "../host/matchHost.js";
-import { Lobby, PALETTE } from "../host/lobby.js";
-import { LoopbackTransport, HostLink, CommandSink } from "../net/transport.js";
-import {
-  WireCommand, Snapshot, LobbyState, ClientMsg, ServerMsg, LobbyAction,
-} from "../net/protocol.js";
-import { AIController } from "../sim/ai.js";
+import { GameHost, HostPeerSink } from "../host/gameHost.js";
+import { ServerMsg } from "../net/protocol.js";
 import { qrAscii, qrMatrix } from "../net/qr.js";
-import { TICK_DT } from "../constants.js";
 
 // ============ Utilities ============
 
@@ -158,31 +154,7 @@ function parseFrames(
   socket.on("error", onClose);
 }
 
-// ============ Remote client link (implements HostLink for MatchHost) ============
-
-class RemoteLink implements HostLink {
-  playerId: number;
-  conn: WSConnection;
-  constructor(playerId: number, conn: WSConnection) {
-    this.playerId = playerId; this.conn = conn;
-  }
-  pushSnapshot(s: Snapshot): void {
-    this.conn.send({ m: "snapshot", data: s });
-  }
-  pushEvent(e: GameEvent): void {
-    this.conn.send({ m: "event", data: e });
-  }
-}
-
 // ============ Server state ============
-
-interface ClientSession {
-  conn: WSConnection;
-  slotIndex: number;
-  token: string;
-  name: string;
-  link: RemoteLink | null; // populated once the match starts
-}
 
 // The compiled server lives at  game/dist/server/host.js , but the web root (index.html,
 // styles.css, fonts) and the client bundle (dist/main.js) are served from the GAME ROOT
@@ -193,20 +165,14 @@ const PORT = Number(process.argv[2]) || Number(process.env.PORT) || 3000;
 const IP = getLanIp();
 const HOST_URL = `http://${IP}:${PORT}`;
 
-const lobby = new Lobby(HOST_URL);
-const clients = new Map<string, ClientSession>(); // connId -> session
-let matchHost: MatchHost | null = null;
-let matchInterval: ReturnType<typeof setInterval> | null = null;
-
-// Slot 0 is reserved for the HOST (the machine running this server). The host's own browser
-// — opened by launch.mjs at http://localhost:<port>/ — connects over loopback and takes slot 0,
-// so the host plays as a thin SocketTransport client of its own authoritative server (spec §3.2 /
-// §24 T25). Remote LAN devices take the next open slot.
-let hostConnId: string | null = null;
-
-// Reconnection grace: disconnected tokens kept alive for 30s
-const graceTokens = new Map<string, { slotIndex: number; timeout: ReturnType<typeof setTimeout> }>();
-const GRACE_MS = 30_000;
+// The authoritative game host (transport-agnostic). Its HostPeerSink maps GameHost's abstract
+// peerIds to the live WebSocket connections.
+const conns = new Map<string, WSConnection>();
+const sink: HostPeerSink = {
+  send(peerId: string, msg: ServerMsg): void { conns.get(peerId)?.send(msg); },
+  disconnect(peerId: string): void { conns.get(peerId)?.close(); },
+};
+const gameHost = new GameHost(sink, { hostUrl: HOST_URL });
 
 // True when the request arrives from the loopback interface (the host's own browser).
 function isLoopbackReq(req: IncomingMessage): boolean {
@@ -214,272 +180,21 @@ function isLoopbackReq(req: IncomingMessage): boolean {
   return a === "::1" || a === "127.0.0.1" || a.endsWith(":127.0.0.1") || a.includes("127.0.0.1");
 }
 
-// Build the public lobby state broadcast to clients: per-slot reconnection tokens are stripped so
-// one client never sees another's token (spec §20.3 — token is host-side only).
-function publicLobby(): LobbyState {
-  return {
-    ...lobby.state,
-    slots: lobby.state.slots.map((s) => ({ ...s, token: undefined })),
-  };
-}
-
 // Injected into the served index.html so the browser knows it was served by the real LAN host
 // (→ auto-join, spec §24 T25) and learns the host's true LAN URL/room to surface in the lobby —
 // never a hardcoded localhost. The static `serve.mjs` (local-only play) does NOT inject this.
 function hostInfoScript(): string {
-  const info = { lanUrl: HOST_URL, ip: IP, port: PORT, room: lobby.state.roomCode, servedByHost: true };
+  const info = { lanUrl: HOST_URL, ip: IP, port: PORT, room: gameHost.lobby.state.roomCode, servedByHost: true };
   return `<script>window.__MYS_HOST__=${JSON.stringify(info)};</script>`;
 }
 
-// ============ Lobby / match logic ============
-
-function broadcastLobby(): void {
-  const msg: ServerMsg = { m: "lobby", state: publicLobby() };
-  for (const c of clients.values()) c.conn.send(msg);
-}
-
-function handleLobbyAction(session: ClientSession, action: LobbyAction): void {
-  const st = lobby.state;
-  const isHost = session.slotIndex === 0;
-  switch (action.a) {
-    case "setColor": lobby.setColor(session.slotIndex, action.color); break;
-    case "setHero": lobby.setHero(session.slotIndex, action.hero); break;
-    case "ready": lobby.setReady(session.slotIndex, action.ready); break;
-    case "setName": lobby.setName(session.slotIndex, action.name); break;
-    // host-only:
-    case "setMap": if (isHost) lobby.setMap(action.map); break;
-    case "addAI": if (isHost) lobby.addAI(action.diff); break;
-    case "removeSlot": if (isHost) lobby.removeSlot(action.index); break;
-    case "openSlot": if (isHost) lobby.openSlot(action.index); break;
-    case "closeSlot": if (isHost) lobby.closeSlot(action.index); break;
-    case "kick":
-      if (isHost) {
-        // disconnect the kicked client
-        for (const [id, c] of clients) if (c.slotIndex === action.index) { c.conn.close(); clients.delete(id); }
-        lobby.kick(action.index);
-      }
-      break;
-    case "setSplit": if (isHost) lobby.setSplit(action.on); break;
-    case "start":
-      if (isHost && lobby.canStart()) startMatch();
-      break;
-  }
-  broadcastLobby();
-}
-
-function startMatch(): void {
-  if (matchHost) return;
-  lobby.state.started = true;
-  const map = getMap(lobby.state.map);
-  const world = new World(map);
-  const participants = lobby.participants();
-
-  // Compact player ids to 0..n-1
-  const idMap = new Map<number, number>();
-  participants.sort((a, b) => a.index - b.index);
-  participants.forEach((p, i) => idMap.set(p.index, i));
-
-  const mkPlayer = (slot: typeof participants[0], id: number): PlayerState => ({
-    id, silver: 15, iron: 0, gold: 0, color: slot.color, isAI: slot.kind === "ai",
-    aiDiff: slot.ai || "normal", defeated: false,
-    powerGen: 0, powerUse: 0, brownout: false, heroId: 0, heroLevel: 1, heroXp: 0, heroRespawnAt: 0,
-    research: { weapons: 0, armor: 0, factoryTech: 0, logistics: false },
-    unitsBuilt: 0, unitsLost: 0, buildingsDestroyed: 0,
-  });
-
-  participants.forEach((slot, i) => world.addPlayer(mkPlayer(slot, i)));
-  participants.forEach((_, i) => world.spawnBase(i, map.spawns[i]));
-  world.setupNeutrals();
-
-  matchHost = new MatchHost(world);
-
-  // Setup AI
-  participants.forEach((slot, i) => { if (slot.kind === "ai") matchHost!.addAIPlayer(i); });
-
-  // Setup remote links for connected clients
-  const startMsg = (you: number): ServerMsg => ({
-    m: "start",
-    map: lobby.state.map,
-    players: participants.map((slot, i) => ({
-      id: i, color: slot.color, isAI: slot.kind === "ai", aiDiff: slot.ai || "normal", hero: slot.hero,
-    })),
-    you,
-  });
-
-  for (const c of clients.values()) {
-    const simId = idMap.get(c.slotIndex);
-    if (simId === undefined) continue;
-    const link = new RemoteLink(simId, c.conn);
-    c.link = link;
-    matchHost.addLink(link);
-    c.conn.send(startMsg(simId));
-  }
-
-  // Tick the sim at 20 Hz
-  matchHost.step(); // prime
-  matchInterval = setInterval(() => {
-    if (!matchHost) return;
-    matchHost.step();
-    // Check for host-gone (all remote clients disconnected AND no host local)
-    if (matchHost.world.winner !== -2) {
-      // match ended
-      setTimeout(() => stopMatch(), 5000);
-    }
-  }, TICK_DT * 1000);
-
-  broadcastLobby();
-}
-
-function stopMatch(): void {
-  if (matchInterval) { clearInterval(matchInterval); matchInterval = null; }
-  matchHost = null;
-  lobby.state.started = false;
-  // reset lobby
-  for (const s of lobby.state.slots) { if (s.kind === "human" && s.index !== 0) s.ready = false; }
-  broadcastLobby();
-}
-
-function handleClientMsg(session: ClientSession, raw: string): void {
-  let msg: ClientMsg;
-  try { msg = JSON.parse(raw); } catch { return; }
-
-  switch (msg.m) {
-    case "hello":
-      // handled at connection time; ignore duplicates
-      break;
-    case "lobby":
-      if (!lobby.state.started) handleLobbyAction(session, msg.action);
-      break;
-    case "cmd":
-      if (matchHost && session.link) {
-        matchHost.submit(msg.data);
-      }
-      break;
-    case "ping":
-      session.conn.send({ m: "pong", t: msg.t });
-      break;
-  }
-}
-
 function onClientConnect(conn: WSConnection, req: IncomingMessage): void {
-  let session: ClientSession | null = null;
-  let helloReceived = false;
-
-  parseFrames(conn.socket, (raw) => {
-    if (!helloReceived) {
-      // First message must be "hello"
-      let msg: ClientMsg;
-      try { msg = JSON.parse(raw); } catch { conn.close(); return; }
-      if (msg.m !== "hello") { conn.close(); return; }
-      helloReceived = true;
-
-      const name = (msg.name || "Player").slice(0, 20);
-      let token = msg.token;
-
-      // Check for reconnection via token
-      if (token && graceTokens.has(token)) {
-        const grace = graceTokens.get(token)!;
-        clearTimeout(grace.timeout);
-        graceTokens.delete(token);
-        session = { conn, slotIndex: grace.slotIndex, token, name, link: null };
-        clients.set(conn.id, session);
-        if (grace.slotIndex === 0) hostConnId = conn.id;
-        lobby.state.slots[grace.slotIndex].kind = "human";
-        lobby.state.slots[grace.slotIndex].name = name;
-        lobby.state.slots[grace.slotIndex].ready = false;
-        lobby.state.slots[grace.slotIndex].token = token;
-
-        // If match is running, re-link
-        if (matchHost) {
-          const participants = lobby.participants().sort((a, b) => a.index - b.index);
-          const simId = participants.findIndex((p) => p.index === grace.slotIndex);
-          if (simId >= 0) {
-            const link = new RemoteLink(simId, conn);
-            session.link = link;
-            matchHost.addLink(link);
-            // Send a full snapshot immediately so the client resyncs
-            const grid = matchHost.computeVisibility(simId);
-            conn.send({ m: "snapshot", data: matchHost.buildSnapshot(simId, grid) });
-          }
-          // Notify other players of the reconnection
-          for (const c of clients.values()) {
-            if (c !== session) {
-              c.conn.send({ m: "event", data: { e: "toast", key: "net.joined", kind: "ok", params: { name } } });
-            }
-          }
-        }
-        conn.send({ m: "welcome", playerId: grace.slotIndex, token, you: grace.slotIndex });
-        broadcastLobby();
-        return;
-      }
-
-      // New connection: claim a slot. The host's own browser is opened by launch.mjs at
-      // http://localhost:<port>/ and connects over loopback — it takes slot 0 and plays as a thin
-      // client of its own server (spec §3.2 / §24 T25). Remote LAN devices take the next open slot.
-      if (lobby.state.started) {
-        conn.send({ m: "error", reason: "Match already in progress", key: "join.started" });
-        conn.close();
-        return;
-      }
-      token = randomToken();
-      let slotIndex: number;
-      if (hostConnId === null && isLoopbackReq(req)) {
-        slotIndex = lobby.claimHostSlot(name, token);
-        if (slotIndex >= 0) hostConnId = conn.id;
-        else slotIndex = lobby.claimHumanSlot(name, token);
-      } else {
-        slotIndex = lobby.claimHumanSlot(name, token);
-      }
-      if (slotIndex < 0) {
-        conn.send({ m: "error", reason: "Lobby is full", key: "join.full" });
-        conn.close();
-        return;
-      }
-      session = { conn, slotIndex, token, name, link: null };
-      clients.set(conn.id, session);
-      conn.send({ m: "welcome", playerId: slotIndex, token, you: slotIndex });
-      broadcastLobby();
-      return;
-    }
-
-    if (session) handleClientMsg(session, raw);
-  },
-  () => { // on close
-    conn.alive = false;
-    if (!session) return;
-    clients.delete(conn.id);
-
-    if (matchHost && session.link) {
-      // Match running: grace period for reconnection (spec §20.5)
-      matchHost.removeLink(session.link);
-      session.link = null;
-      const token = session.token;
-      const slotIdx = session.slotIndex;
-      const playerName = session.name;
-      // Notify other clients that this player dropped
-      for (const c of clients.values()) {
-        c.conn.send({ m: "event", data: { e: "toast", key: "net.left", kind: "warning", params: { name: playerName } } });
-      }
-      const timeout = setTimeout(() => {
-        graceTokens.delete(token);
-        lobby.releaseSlot(slotIdx);
-        broadcastLobby();
-      }, GRACE_MS);
-      graceTokens.set(token, { slotIndex: slotIdx, timeout });
-    } else {
-      // In lobby: release the slot. If the host's own browser closed, free slot 0 (keep it shown as
-      // "Host") so a reload reclaims it as the host rather than landing in a join slot.
-      if (conn.id === hostConnId) {
-        hostConnId = null;
-        const s0 = lobby.state.slots[0];
-        if (s0) { s0.token = undefined; s0.ready = false; }
-      } else {
-        lobby.releaseSlot(session.slotIndex);
-      }
-      broadcastLobby();
-    }
-  },
-  () => { /* ping handler — keep-alive tracked via alive flag */ });
+  conns.set(conn.id, conn);
+  gameHost.onPeerConnect(conn.id, isLoopbackReq(req));
+  parseFrames(conn.socket,
+    (raw) => gameHost.onPeerMessage(conn.id, raw),
+    () => { conn.alive = false; conns.delete(conn.id); gameHost.onPeerDisconnect(conn.id); },
+    () => { /* ping handler — keep-alive tracked via alive flag */ });
 }
 
 // ============ HTTP server (static files + WebSocket upgrade) ============
@@ -542,12 +257,12 @@ server.on("upgrade", (req: IncomingMessage, socket: import("node:net").Socket, h
 });
 
 server.listen(PORT, () => {
-  const joinUrl = `${HOST_URL}/?room=${lobby.state.roomCode}`;
+  const joinUrl = `${HOST_URL}/?room=${gameHost.lobby.state.roomCode}`;
   console.log("═══════════════════════════════════════════════════════════════");
   console.log("  MYS Generals — LAN Host Server");
   console.log("═══════════════════════════════════════════════════════════════");
   console.log(`  Join URL : ${joinUrl}`);
-  console.log(`  Room code: ${lobby.state.roomCode}`);
+  console.log(`  Room code: ${gameHost.lobby.state.roomCode}`);
   console.log(`  Port     : ${PORT}`);
   console.log("───────────────────────────────────────────────────────────────");
   console.log("  Scan this QR code to join:");
@@ -562,9 +277,7 @@ server.listen(PORT, () => {
 // ============ Graceful shutdown: broadcast hostgone to all clients (spec §20.5) ============
 function shutdown(): void {
   console.log("\n  Shutting down — notifying clients...");
-  const msg: ServerMsg = { m: "hostgone" };
-  for (const c of clients.values()) { try { c.conn.send(msg); } catch { /* */ } }
-  if (matchInterval) clearInterval(matchInterval);
+  gameHost.shutdown();
   setTimeout(() => { server.close(); process.exit(0); }, 300);
 }
 process.on("SIGINT", shutdown);

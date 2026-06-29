@@ -1089,7 +1089,7 @@ Single-player needs a competent AI so the game is fun solo. The AI runs **on the
 
 ---
 
-## 24. BUILD TASK PLAN (T0 – T30)
+## 24. BUILD TASK PLAN (T0 – T31)
 
 Tasks are **ordered**. Each has a **Goal**, a **Scope checklist** (every box must be checked), and a **Definition of Done (DoD)**. A task ships only when all boxes are checked and all DoD lines pass. Tasks reference the design sections above for exact numbers and behaviors. Every animation/VFX listed in §16 for a feature is part of that feature's task — "functional but no animation" is **not** done.
 
@@ -1946,6 +1946,75 @@ DoD: when the player picks a building to place, the **command / selection / hero
 - [ ] New + existing **headless tests pass**; `bash build.sh` is clean.
 
 DoD: the **Command Center can be upgraded to Level 2 and 3** (each costing resources and time, the upgrade taking **half** a comparable build); its level **unlocks buildings** — **Barracks at L2, War Factory at L3**, with the **Guard / Cannon / Rocket** towers unlocking at **L1 / L2 / L3** — and locked buildings are visibly gated with a clear reason until the base levels up. **Defensive towers can be upgraded up to Level 3**, and selecting one **shows the radius it sees and fires in**, which **grows** (along with its damage) at each level. **No mine produces without a miner inside it**: the player **trains a miner at the base for 5 silver**, the miner **walks to a free mine and disappears into it** (it no longer loiters beside the mine), and the mine then earns at the canonical rate; an empty mine sits **idle** and prompts for miners. Everything is **host-authoritative** and works in single-player, split-screen (T24) and LAN (T25). Verifiable headlessly: the base-tech-gating, CC/defense-upgrade, worked-mine-economy and extended mine-ETA suites all pass; `bash build.sh` is clean and every suite is green; all UI reads correctly in uz/ru/en.
+
+---
+
+### T31 — Split worker roles: a dedicated Engineer (builder) and a mining-only Miner, one miner per mine  *(worker model overhaul)*
+
+**Goal:** cleanly **separate the two worker jobs** that today are tangled into the Miner. (1) Restore a dedicated **Engineer ("usta" — builder)**: you **select it, pick what to build, and it constructs** it (exactly the old build flow), and the player **starts with one Engineer** so building works from the first second. (2) The **Miner becomes mining-only**: it does not build — it walks to a free mine, **goes inside and digs**, and **only one miner works a mine** (each mine takes exactly one miner). If you train a Miner while every mine is already worked (or no mine is built yet), it **waits** and automatically enters the next mine the moment one is built or freed. (3) Both workers are trained at the **Command Center**: a **Miner for 5 silver** (goes off to dig, entering a free mine) and an **Engineer for 20 silver** (builds, like before). At the start the player has the usual **silver mine with its miner already inside** (per T30) **plus** one Engineer.
+
+**Why this task (current behavior, with file references):**
+- **The Miner is overloaded — it both builds and mines.** In `sim/world.ts`, `tryBuild()` dispatches `nearestIdleWorker()` which only ever returns a **miner** (`e.type !== "miner"` is skipped), sets its `buildTask`, and construction in `economySystem()` advances faster only while a **miner** with that `buildTask` is near (`builderNear = … m.type === "miner" … m.buildTask …`). The same Miner is also the digger (`mineId` / `mining` / `inMine`, T30). So one unit is doing two unrelated jobs, which is exactly what the design owner wants split.
+- **The Engineer is under-used.** `data.ts units.engineer` (`isWorker`, cost `{ gold: 1, silver: 20 }`, `builtAt: ["barracks"]`) currently only **captures** oil derricks (`captureTask` in `world.ts`). It is meant to be the **builder** ("usta").
+- **The build menu keys off the Miner.** `ui/hud.ts` shows the build palette when a **miner** is selected (`const miner = own.find(e => e.type === "miner")`; `panelHtml(…, miner, …)`; `minerPanelShown()` drives the T26/T27 keyboard category navigation). With miners now living **inside** mines (T30, hidden), there is often **no selectable miner** to open the build menu — so building must move to the Engineer.
+- **The start has no builder.** `spawnBase()` spawns the CC + a silver mine + **one miner (now inside the mine)**. There is no free worker on the field to construct the first buildings.
+- **Mine occupancy currently allows 3 in a silver mine.** T30's `mineSlotCap()` returns `SILVER_MINE_SLOTS (3)` for silver; the design owner now wants **one miner per mine** for every type.
+
+> Scope note: this **extends the authoritative simulation** (§3.2) — it reassigns which unit type builds vs. mines and changes mine occupancy — but introduces **no new netcode**: building still flows through the existing `build` `Command` → host → `MatchHost`, and training through `train`. It must regress cleanly in single-player, split-screen (T24) and LAN (T25). All numbers are starting balance (tunable in T21). **This supersedes T30's multi-miner silver mine**: every mine is now worked by exactly one miner (the silver "scales with miners" rule is retired; flag the change to the §0 "3 work slots" figure).
+
+---
+
+#### Part A — A dedicated Engineer (the builder)
+
+**A1. The Engineer builds.** Move the construction role from the Miner to the **Engineer**. `tryBuild()`'s `nearestIdleWorker()` must dispatch the nearest **idle Engineer** (no `buildTask` / `captureTask`), and the construction-speed `builderNear` check in `economySystem()` must look for an **Engineer** with the matching `buildTask`. The Engineer keeps its existing **capture** ability (it remains the unit that seizes oil derricks). When a building is cancelled/finished, the Engineer is freed (its `buildTask` cleared) and returns to idle near the build site.
+
+**A2. Select-to-build is on the Engineer.** The HUD build palette (`ui/hud.ts panelHtml` + the T26/T27 keyboard category navigation: `minerPanelShown()` / `catFocus` / digit hotkeys) now opens when an **Engineer** is selected (the "builder panel"), not the Miner. Selecting a Miner shows its mining status (and most miners are inside a mine, so unselectable anyway). Placement (`input.ts setPlacing` → `build` command) is unchanged otherwise.
+
+**A3. Engineer trained at the Command Center for 20 silver.** Add `engineer` to `command_center.produces` and set the Engineer cost to **`{ silver: 20 }`** (affordable early, no gold gate), so the CC trains both a **Miner (5 silver)** and an **Engineer (20 silver)**. (It may remain trainable at the Barracks too; the CC is the primary source.) Engineers are **not** base-level-gated (you need to build from L1).
+
+**A4. Start with one Engineer.** `spawnBase()` spawns an **Engineer** next to the new base (in addition to the silver mine + its in-mine miner), so the player can build immediately.
+
+#### Part B — A mining-only Miner
+
+**B1. Miners do not build.** The Miner loses the build role entirely (no `buildTask`). It is a pure digger: trained at the CC for **5 silver**, it auto-routes to a free mine and **enters it to work** (T30 `inMine`, hidden from the map). Right-clicking a mine with a Miner selected still issues the `mine` command to send it to that specific mine.
+
+**B2. One miner per mine.** `mineSlotCap()` returns **1 for every mine type** (silver included) — exactly **one miner works a mine**. Retire T30's silver "scales with up to 3 miners" rule: a worked silver mine yields its single-miner rate (`+1 / MINER_OUTPUT_INTERVAL`), iron/gold/oil their fixed interval. `mineEta()` (and the T29 selection readout) follow: a mine with its one miner counts down; an empty mine is **idle**. `autoAssignMiner()` only targets a mine with **no** miner yet (so miners spread one-per-mine rather than stacking).
+
+**B3. Idle miners wait, then auto-enter.** A trained Miner with **no free mine available** (every mine already has its miner, or none is built yet) **waits idle** near the base; `workerSystem()` periodically re-runs `autoAssignMiner()` for idle, unassigned miners so that **as soon as a mine finishes construction (or is freed by a destroyed mine)**, a waiting miner walks over and enters it — no manual micro needed. (This is the "the new miner waits for a mineless mine to be built, then goes in" behavior.)
+
+#### Part C — Wiring, AI & feedback
+
+**C1. Production UI.** The Command Center's panel (T26 `prodPanelHtml`) lists **Train Miner (5)** and **Train Engineer (20)** alongside the T30 level-upgrade button. Both train through the existing `train` command and queue.
+
+**C2. AI.** Update `sim/ai.ts` so the AI **trains Engineers to build** (keep at least one idle builder; train another if the only one is busy/lost) and trains **Miners only to staff mines** (one per mine, up to its mine count), and dispatches an Engineer to capture derricks. The AI must still expand and field an army (no regression to skirmish difficulty).
+
+**C3. i18n.** Any new/changed user-facing strings (e.g. the builder-panel header now reads "Engineer — Build", the train labels) exist in **uz/ru/en** with correct Uzbek orthography (U+02BB `ʻ`, U+02BC `ʼ`); `localeParity()` stays green. No hard-coded strings.
+
+---
+
+#### Cross-cutting
+
+**Tests (headless, dependency-free, in `test/`).** Add/extend suites and keep all existing green:
+- **worker-roles**: `tryBuild` dispatches an **Engineer** (not a Miner) as the builder, and construction only advances with an Engineer present; a Miner can no longer be pulled to build; the Engineer still captures.
+- **start-units**: `spawnBase` yields a CC, a silver mine with one in-mine miner, **and one Engineer**.
+- **one-miner-per-mine**: `mineSlotCap` is **1** for every type; a second miner sent to an already-worked mine is **not** admitted and is re-routed; `autoAssignMiner` fills empty mines one each; a Miner trained with no free mine **waits** and **auto-enters** once a mine is built/freed.
+- **train costs**: the CC trains a Miner for 5 silver and an Engineer for 20 silver; both via the `train` command.
+- Extend the T30 `minework` / `mineeta` expectations to the one-miner cap (no silver 3-stack).
+
+**Docs.** Add a **T31 section to `PROGRESS.md`** in the T26–T30 style (Scope checklist, "How each DoD line was verified", "[OPT] deferred"), and update `README.md` (a dedicated Engineer builds — select it and choose what to build; Miners are mining-only, one per mine, and wait for a free mine; train a Miner for 5 silver and an Engineer for 20 silver at the Command Center; you start with one Engineer).
+
+### Scope checklist (T31)
+- [ ] A dedicated **Engineer (builder)** constructs buildings — selecting it opens the build menu and placing dispatches that Engineer; it keeps capturing oil derricks. The build/construction code (`nearestIdleWorker`, `builderNear`) keys off the **Engineer**.
+- [ ] The **Miner is mining-only** (no build role); it enters a free mine and digs, hidden on the map (T30).
+- [ ] **One miner per mine** for every mine type (`mineSlotCap` = 1); the silver multi-miner scaling is retired; `mineEta` / the idle hint follow.
+- [ ] A Miner trained with **no free mine waits** and **auto-enters** the next mine that is built or freed.
+- [ ] Both workers train at the **Command Center**: **Miner = 5 silver**, **Engineer = 20 silver**; the CC panel shows both.
+- [ ] The player **starts with one Engineer** (plus the silver mine + its in-mine miner).
+- [ ] The **AI** trains Engineers to build and Miners to staff mines, and still expands + fights; SP / split-screen (T24) / LAN (T25) regress cleanly.
+- [ ] New strings are **trilingual** (uz/ru/en, correct Uzbek orthography); `localeParity()` passes.
+- [ ] New + existing **headless tests pass**; `bash build.sh` is clean.
+
+DoD: the player **starts with an Engineer** and can **immediately select it and build** (choosing any unlocked building, exactly like the old builder); **Miners no longer build** — a Miner trained at the base for **5 silver** heads to a free mine and **digs inside it**, **one miner per mine**, and if every mine is taken (or none exists yet) it **waits and automatically enters** the next mine that finishes or frees up; an **Engineer trained at the base for 20 silver** builds like before. Everything is **host-authoritative** and identical in single-player, split-screen (T24) and LAN (T25). Verifiable headlessly: the worker-roles, start-units, one-miner-per-mine and train-cost suites pass; `bash build.sh` is clean and every suite is green; all UI reads correctly in uz/ru/en.
 
 ---
 

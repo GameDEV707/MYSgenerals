@@ -365,6 +365,28 @@ select, input {
 .connect-status.err { color: var(--danger); }
 .btn.swatch { padding: 0; }
 
+/* ---------------- Map selection & custom-team lobby ---------------- */
+.mapselect { width: min(960px, 94vw); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; animation: scale-in .3s ease; max-height: 92vh; overflow: auto; }
+.mapselect h2 { color: var(--accent-2); margin-bottom: 14px; text-align: center; }
+.map-cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+.map-card { width: 240px; background: #0d141d; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; transition: transform .1s ease, border-color .12s ease, box-shadow .12s ease; }
+.map-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
+.map-thumb { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1; background: #0a0f14; border-bottom: 1px solid var(--border); image-rendering: pixelated; }
+.map-thumb.small { width: 120px; height: 120px; border: 1px solid var(--border); border-radius: 8px; flex-shrink: 0; }
+.map-card-body { padding: 10px 12px; }
+.map-card-name { font-weight: 700; font-size: 15px; color: var(--text); margin-bottom: 6px; }
+.map-card-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.map-card-desc { font-size: 11px; line-height: 1.4; }
+
+.lobby-mapsummary { display: flex; gap: 12px; align-items: flex-start; background: #0d141d; border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.lobby-mapinfo { display: flex; flex-direction: column; gap: 6px; }
+.lobby-mapinfo .map-card-name { margin: 0; }
+
+.teams { display: flex; gap: 12px; margin-top: 10px; }
+.team-panel { flex: 1; min-width: 0; background: #0d141d; border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.team-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+.team-members { display: flex; flex-direction: column; gap: 6px; }
+
 
 /* ---------------- Settings → Keyboard (spec §24 → T24) ---------------- */
 .settings-menu { width: 660px; max-width: 94vw; max-height: 92vh; overflow: auto; }

@@ -188,7 +188,7 @@ export class MatchHost implements CommandSink {
     }
 
     const players: PlayerSnap[] = w.players.map((p) => {
-      const base: PlayerSnap = { id: p.id, color: p.color, defeated: p.defeated };
+      const base: PlayerSnap = { id: p.id, color: p.color, defeated: p.defeated, team: p.team };
       if (p.id === pid) {
         base.silver = p.silver; base.iron = p.iron; base.gold = p.gold;
         base.powerGen = p.powerGen; base.powerUse = p.powerUse; base.brownout = p.brownout;

@@ -209,7 +209,7 @@ export class MatchHost {
             entities.push({ ...stub, fl: stub.fl | FL.stub });
         }
         const players = w.players.map((p) => {
-            const base = { id: p.id, color: p.color, defeated: p.defeated };
+            const base = { id: p.id, color: p.color, defeated: p.defeated, team: p.team };
             if (p.id === pid) {
                 base.silver = p.silver;
                 base.iron = p.iron;

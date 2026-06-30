@@ -220,11 +220,12 @@ export class WorldView {
         for (const ps of snap.players) {
             let pv = this.players[ps.id];
             if (!pv) {
-                pv = { id: ps.id, color: ps.color, defeated: false, silver: 0, iron: 0, gold: 0, powerGen: 0, powerUse: 0, brownout: false, heroId: 0, heroLevel: 1, heroXp: 0, heroRespawnAt: 0, research: { weapons: 0, armor: 0, factoryTech: 0, logistics: false }, unitsBuilt: 0, unitsLost: 0, buildingsDestroyed: 0 };
+                pv = { id: ps.id, color: ps.color, defeated: false, team: ps.team ?? -1, silver: 0, iron: 0, gold: 0, powerGen: 0, powerUse: 0, brownout: false, heroId: 0, heroLevel: 1, heroXp: 0, heroRespawnAt: 0, research: { weapons: 0, armor: 0, factoryTech: 0, logistics: false }, unitsBuilt: 0, unitsLost: 0, buildingsDestroyed: 0 };
                 this.players[ps.id] = pv;
             }
             pv.color = ps.color;
             pv.defeated = ps.defeated;
+            pv.team = ps.team ?? -1;
             if (ps.id === snap.you) {
                 pv.silver = ps.silver;
                 pv.iron = ps.iron;

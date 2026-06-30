@@ -45,7 +45,8 @@ export class MatchSession {
         const map = getMap(cfg.map);
         const world = new World(map);
         const mk = (p, id) => ({
-            id, silver: 15, iron: 0, gold: 0, color: p.color, isAI: p.isAI, aiDiff: p.aiDiff, defeated: false,
+            id, silver: 15, iron: 0, gold: 0, color: p.color, isAI: p.isAI, aiDiff: p.aiDiff,
+            team: p.team ?? -1, defeated: false,
             powerGen: 0, powerUse: 0, brownout: false, heroId: 0, heroLevel: 1, heroXp: 0, heroRespawnAt: 0,
             research: { weapons: 0, armor: 0, factoryTech: 0, logistics: false },
             unitsBuilt: 0, unitsLost: 0, buildingsDestroyed: 0,
@@ -56,8 +57,7 @@ export class MatchSession {
         const idMap = new Map();
         sorted.forEach((p, i) => idMap.set(p.id, i));
         sorted.forEach((p, i) => world.addPlayer(mk(p, i)));
-        sorted.forEach((_, i) => world.spawnBase(i, map.spawns[i]));
-        world.setupNeutrals();
+        world.spawnAllBases(cfg.gameType ?? "classic");
         this.host = new MatchHost(world);
         this.world = world;
         sorted.forEach((p, i) => { if (p.isAI)
@@ -90,10 +90,20 @@ export class MatchSession {
             this.bundles.push(b);
         });
         this.layout();
-        // prime one snapshot so the first frame has state, then center each camera on its base
+        // prime one snapshot so the first frame has state, then center each camera on its own start
+        // position — the player's hero (or their team's base in custom-team mode), falling back to the
+        // map spawn point.
         this.host.step();
-        for (const b of this.bundles)
-            this.bundles.length && b.renderer.centerOn(map.spawns[b.playerId].x, map.spawns[b.playerId].y);
+        for (const b of this.bundles) {
+            let cx = map.spawns[b.playerId]?.x ?? map.spawns[0].x;
+            let cy = map.spawns[b.playerId]?.y ?? map.spawns[0].y;
+            const own = world.entities.find((e) => e.owner === b.playerId && (e.type === "hero" || e.type === "command_center") && !e.dead);
+            if (own) {
+                cx = own.pos.x;
+                cy = own.pos.y;
+            }
+            b.renderer.centerOn(cx, cy);
+        }
         // T34: seed the split-screen mouse player's confined cursor at its viewport centre so it is
         // visible immediately (the native cursor is hidden in split mode — see the loop below).
         for (const b of this.bundles) {

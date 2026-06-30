@@ -4,7 +4,7 @@ import { Lobby, PALETTE } from "../host/lobby.js";
 import { SessionConfig, SessionPlayer, LocalSpec, Difficulty } from "../client/session.js";
 import { getMap, MAP_IDS } from "../sim/map.js";
 import { qrMatrix } from "../net/qr.js";
-import { LobbyState, ServerMsg } from "../net/protocol.js";
+import { LobbyState, ServerMsg, GameType } from "../net/protocol.js";
 import { SocketTransport } from "../net/socketTransport.js";
 import { LobbyClient, RemoteClientCallbacks } from "../net/transport.js";
 import { BrowserHost, PendingInvite } from "../net/webrtcHost.js";
@@ -93,7 +93,7 @@ export class Menu {
       </div></div>`);
     this.root.appendChild(scr); this.wireLang(scr);
     (scr.querySelector("[data-id=p-single]") as HTMLElement).onclick = () => this.showSetup();
-    (scr.querySelector("[data-id=p-host]") as HTMLElement).onclick = () => this.showLobby();
+    (scr.querySelector("[data-id=p-host]") as HTMLElement).onclick = () => this.showMapSelect();
     (scr.querySelector("[data-id=p-joinonline]") as HTMLElement).onclick = () => this.showJoinOnline();
     (scr.querySelector("[data-id=p-join]") as HTMLElement).onclick = () => this.showJoin();
     (scr.querySelector("[data-id=p-back]") as HTMLElement).onclick = () => this.showTitle();
@@ -150,18 +150,86 @@ export class Menu {
     this.cb.onStartLocal({ map: this.spCfg.map, players, locals, split: false, showRematch: true, onQuit: () => this.showTitle() });
   }
 
+  // ---------- Map selection (cards: preview, name, size, player count) ----------
+  // Shown after choosing "Host Local Game". Each map is a rectangular card with a generated terrain
+  // preview, its name, its tile size and the number of players it is tuned for.
+  private showMapSelect(): void {
+    this.root.innerHTML = "";
+    const scr = this.el(`<div class="screen mapselect-screen" data-screen="mapselect">
+      ${this.langSwitch()}
+      <div class="mapselect">
+        <h2>${t("lobby.selectMap")}</h2>
+        <div class="map-cards">
+          ${MAP_IDS.map((id) => {
+            const m = getMap(id);
+            return `<div class="map-card" data-map="${id}">
+              <canvas class="map-thumb" width="200" height="200" data-thumb="${id}"></canvas>
+              <div class="map-card-body">
+                <div class="map-card-name">${t(m.nameKey)}</div>
+                <div class="map-card-meta">
+                  <span class="badge">${t("lobby.mapSize", { w: m.w, h: m.h })}</span>
+                  <span class="badge">${t("lobby.mapPlayers", { n: m.spawns.length })}</span>
+                </div>
+                <div class="map-card-desc dim">${t("lobby.mapDesc." + id)}</div>
+              </div>
+            </div>`;
+          }).join("")}
+        </div>
+        <div class="row" style="margin-top:14px;justify-content:center">
+          <button class="btn" data-id="ms-back">${t("menu.back")}</button>
+        </div>
+      </div></div>`);
+    this.root.appendChild(scr); this.wireLang(scr);
+    for (const id of MAP_IDS) {
+      const c = scr.querySelector(`[data-thumb="${id}"]`) as HTMLCanvasElement | null;
+      if (c) this.drawMapThumb(c, id);
+    }
+    scr.querySelectorAll<HTMLElement>("[data-map]").forEach((card) => {
+      card.onclick = () => this.showLobby(card.dataset.map!);
+    });
+    (scr.querySelector("[data-id=ms-back]") as HTMLElement).onclick = () => this.showPlayMenu();
+  }
+
+  // Draw a small top-down terrain preview of a map (grass/cliff/water/road/wall tiles) and mark the
+  // player spawn points and capturable neutral points.
+  private drawMapThumb(canvas: HTMLCanvasElement, mapId: string): void {
+    const m = getMap(mapId);
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    const W = canvas.width, H = canvas.height;
+    const colors = ["#3c5a3a", "#5a5048", "#26506b", "#6b6258", "#71727a"]; // grass, cliff, water, road, wall
+    const sx = W / m.w, sy = H / m.h;
+    ctx.fillStyle = colors[0]; ctx.fillRect(0, 0, W, H);
+    for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
+      const tv = m.terrain[y * m.w + x];
+      if (tv === 0) continue;
+      ctx.fillStyle = colors[tv] || colors[0];
+      ctx.fillRect(Math.floor(x * sx), Math.floor(y * sy), Math.ceil(sx), Math.ceil(sy));
+    }
+    ctx.fillStyle = "#cdd6df";
+    for (const n of m.neutrals) { ctx.beginPath(); ctx.arc(n.x * sx, n.y * sy, 2, 0, Math.PI * 2); ctx.fill(); }
+    const spawnColors = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc"];
+    m.spawns.forEach((s, i) => {
+      ctx.fillStyle = spawnColors[i % spawnColors.length];
+      ctx.beginPath(); ctx.arc(s.x * sx, s.y * sy, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1; ctx.stroke();
+    });
+  }
+
   // ---------- Local Game on this computer (loopback: single-player extras, split-screen, AI) ----------
   // This path runs an in-page MatchHost over LoopbackTransport. A browser cannot run a WebSocket
   // server, so it can NEVER accept remote devices — for that the user runs the real Node host
   // (host.bat / host.sh / host.command). Hence no join URL/QR is shown here (spec §24 T25 #2/#3).
-  private showLobby(): void {
-    this.lobby = new Lobby("");
+  private showLobby(map = "twin_rivers"): void {
+    this.lobby = new Lobby("", map);
     this.lobby.onChange = () => this.renderLobby();
     this.renderLobby();
   }
 
   private renderLobby(): void {
     const lobby = this.lobby!; const st = lobby.state;
+    const map = getMap(st.map);
+    const team = st.gameType === "team";
+    const hasOpen = st.slots.some((s) => s.kind === "open");
     this.root.innerHTML = "";
     const scr = this.el(`<div class="screen lobby-screen" data-screen="lobby">
       ${this.langSwitch()}
@@ -169,17 +237,34 @@ export class Menu {
         <h2>${t("lobby.title")}</h2>
         <div class="lobby-cols">
           <div class="lobby-main">
-            <div class="field"><label>${t("menu.map")}</label>
-              <select data-id="l-map">${MAPS.map((m) => `<option value="${m}" ${st.map === m ? "selected" : ""}>${t(getMap(m).nameKey)}</option>`).join("")}</select>
-              <div class="mapdesc">${t("lobby.mapDesc." + st.map)}<br><span class="dim">${t("lobby.recommended", { n: getMap(st.map).spawns.length })}</span></div>
+            <div class="lobby-mapsummary">
+              <canvas class="map-thumb small" width="120" height="120" data-id="l-thumb"></canvas>
+              <div class="lobby-mapinfo">
+                <div class="map-card-name">${t(map.nameKey)}</div>
+                <div class="map-card-meta">
+                  <span class="badge">${t("lobby.mapSize", { w: map.w, h: map.h })}</span>
+                  <span class="badge">${t("lobby.mapPlayers", { n: map.spawns.length })}</span>
+                </div>
+                <button class="btn tiny" data-id="l-changemap">${t("lobby.changeMap")}</button>
+              </div>
             </div>
-            <div class="slots" data-id="l-slots">${st.slots.map((s) => this.slotHtml(s)).join("")}</div>
-            <label class="splitrow"><input type="checkbox" data-id="l-split" ${st.splitScreen ? "checked" : ""}/> ${t("lobby.splitScreen")}</label>
+            <div class="field" style="margin-top:10px"><label>${t("lobby.gameType")}</label>
+              <div class="conn-toggle row" style="gap:6px" data-id="l-gametype">
+                <button class="btn tiny ${team ? "" : "active"}" data-gametype="classic">${t("lobby.gtClassic")}</button>
+                <button class="btn tiny ${team ? "active" : ""}" data-gametype="team">${t("lobby.gtTeam")}</button>
+              </div>
+              <div class="dim" style="font-size:11px;margin-top:4px">${team ? t("lobby.gtTeamHint") : t("lobby.gtClassicHint")}</div>
+            </div>
+            ${team ? this.teamsHtml(lobby) : this.classicSlotsHtml(lobby)}
+            <div class="row" style="margin-top:8px">
+              <button class="btn" data-id="l-addslot" ${hasOpen ? "" : "disabled"}>${t("lobby.addSlot")}</button>
+            </div>
+            <div class="dim" style="font-size:11px;margin-top:2px">${t("lobby.addSlotHint", { n: map.spawns.length })}</div>
+            <label class="splitrow" style="margin-top:10px"><input type="checkbox" data-id="l-split" ${st.splitScreen ? "checked" : ""}/> ${t("lobby.splitScreen")}</label>
             <div class="dim" style="font-size:11px">${t("lobby.splitHint")}</div>
             ${st.splitScreen ? this.splitInputHtml() : ""}
             ${st.splitScreen && lobby.splitB >= 0 ? `<div class="field" style="margin-top:8px"><label>${t("lobby.player2Name")}</label><input data-id="l-nameb" maxlength="20" value="${this.escAttr(st.slots[lobby.splitB]?.name || "Player B")}"/></div>` : ""}
             <div class="row" style="margin-top:10px">
-              <button class="btn" data-id="l-addai">${t("lobby.addAI")}</button>
               <button class="btn primary" data-id="l-start" ${lobby.canStart() ? "" : "disabled"}>${t("lobby.start")}</button>
               <button class="btn" data-id="l-back">${t("menu.back")}</button>
             </div>
@@ -189,6 +274,7 @@ export class Menu {
             <h4>${t("lobby.connection")}</h4>
             ${this.connToggleHtml(false)}
             <div class="field" style="margin-top:8px"><label>${t("lobby.yourName")}</label><input data-id="l-name" maxlength="20" value="${this.escAttr(st.slots[0]?.name && st.slots[0].name !== "Host" ? st.slots[0].name : defaultName())}"/></div>
+            ${this.localLinkHtml()}
             <div class="dim lan-note">${t("lobby.localNote")}</div>
             <div class="devices"><h4>${t("lobby.devices")}</h4><div data-id="l-devices">${this.devicesHtml()}</div></div>
           </div>
@@ -196,12 +282,23 @@ export class Menu {
       </div></div>`);
     this.root.appendChild(scr); this.wireLang(scr);
 
-    (scr.querySelector("[data-id=l-map]") as HTMLSelectElement).onchange = (e) => lobby.setMap((e.target as HTMLSelectElement).value);
+    const thumb = scr.querySelector("[data-id=l-thumb]") as HTMLCanvasElement | null;
+    if (thumb) this.drawMapThumb(thumb, st.map);
+    (scr.querySelector("[data-id=l-changemap]") as HTMLElement).onclick = () => { this.lobby = null; this.showMapSelect(); };
     (scr.querySelector("[data-id=l-split]") as HTMLInputElement).onchange = (e) => lobby.setSplit((e.target as HTMLInputElement).checked);
     this.wireSplitInput(scr);
-    (scr.querySelector("[data-id=l-addai]") as HTMLElement).onclick = () => lobby.addAI("normal");
+    (scr.querySelector("[data-id=l-addslot]") as HTMLElement).onclick = () => {
+      if (team) lobby.addAITeam(lobby.teamMembers(0).length <= lobby.teamMembers(1).length ? 0 : 1, "normal");
+      else lobby.addAI("normal");
+    };
     (scr.querySelector("[data-id=l-back]") as HTMLElement).onclick = () => { this.lobby = null; this.showPlayMenu(); };
     (scr.querySelector("[data-id=l-start]") as HTMLElement).onclick = () => this.startLobby();
+    // game-type toggle
+    scr.querySelectorAll<HTMLElement>("[data-gametype]").forEach((b) => {
+      b.onclick = () => lobby.setGameType(b.dataset.gametype as GameType);
+    });
+    // local copyable link
+    this.wireLocalLink(scr);
     // Editable host name (persisted → defaultName for next session and for online/LAN slots).
     const nameInput = scr.querySelector("[data-id=l-name]") as HTMLInputElement | null;
     if (nameInput) nameInput.onchange = () => { const v = nameInput.value.trim() || "Host"; lobby.setName(0, v); setDefaultName(v); };
@@ -214,7 +311,7 @@ export class Menu {
       const v = nameInput?.value.trim(); if (v) setDefaultName(v);
       this.startOnlineHost();
     });
-    // slot controls
+    // slot controls (classic rows + team rows share data-slot-act / data-slot-color)
     scr.querySelectorAll<HTMLElement>("[data-slot-act]").forEach((b) => {
       b.onclick = () => {
         const i = parseInt(b.dataset.slot || "0", 10);
@@ -229,6 +326,84 @@ export class Menu {
     scr.querySelectorAll<HTMLElement>("[data-slot-color]").forEach((b) => {
       b.onclick = () => lobby.setColor(parseInt(b.dataset.slot || "0", 10), b.dataset.slotColor!);
     });
+    // team controls: switch a slot's side, recolour a side, add AI to a side
+    scr.querySelectorAll<HTMLElement>("[data-team-move]").forEach((b) => {
+      b.onclick = () => lobby.setTeam(parseInt(b.dataset.slot || "0", 10), parseInt(b.dataset.teamMove || "0", 10));
+    });
+    scr.querySelectorAll<HTMLElement>("[data-team-color]").forEach((b) => {
+      b.onclick = () => lobby.setTeamColor(parseInt(b.dataset.team || "0", 10), b.dataset.teamColor!);
+    });
+    scr.querySelectorAll<HTMLElement>("[data-team-addai]").forEach((b) => {
+      b.onclick = () => lobby.addAITeam(parseInt(b.dataset.teamAddai || "0", 10), "normal");
+    });
+  }
+
+  // Classic (FFA) slot list — every occupied / open slot rendered as a row.
+  private classicSlotsHtml(lobby: Lobby): string {
+    return `<div class="slots" data-id="l-slots">${lobby.state.slots.map((s) => this.slotHtml(s)).join("")}</div>`;
+  }
+
+  // Custom-team layout — two side panels (blue / red) each listing their members, a side colour
+  // picker and an "add AI to this side" button.
+  private teamsHtml(lobby: Lobby): string {
+    const hasOpen = lobby.state.slots.some((s) => s.kind === "open");
+    const side = (team: number): string => {
+      const color = lobby.state.teamColors[team];
+      const members = lobby.teamMembers(team);
+      const rows = members.map((s) => this.teamSlotHtml(s, team)).join("") || `<div class="dim" style="font-size:12px;padding:6px">${t("lobby.teamEmpty")}</div>`;
+      const swatches = PALETTE.map((c) => `<span class="mini-swatch ${color === c ? "on" : ""}" data-team="${team}" data-team-color="${c}" style="background:${c}"></span>`).join("");
+      return `<div class="team-panel" style="border-color:${color}">
+        <div class="team-head" style="color:${color}">
+          <span>${t("lobby.team" + (team === 0 ? "Blue" : "Red"))}</span>
+          <span class="swatches">${swatches}</span>
+        </div>
+        <div class="team-members">${rows}</div>
+        <button class="btn tiny" data-team-addai="${team}" ${hasOpen ? "" : "disabled"}>${t("lobby.addAI")}</button>
+      </div>`;
+    };
+    return `<div class="teams" data-id="l-teams">${side(0)}${side(1)}</div>`;
+  }
+
+  private teamSlotHtml(s: import("../net/protocol.js").LobbySlot, team: number): string {
+    const isHostSlot = s.index === 0;
+    const color = this.lobby!.state.teamColors[team];
+    const name = s.kind === "human" ? (isHostSlot ? (s.name && s.name !== "Host" ? s.name : t("lobby.host")) : (s.name || t("lobby.playerB"))) : t("lobby.aiPlayer");
+    const other = team === 0 ? 1 : 0;
+    const moveBtn = `<button class="btn tiny" data-slot="${s.index}" data-team-move="${other}">→ ${t("lobby.team" + (other === 0 ? "Blue" : "Red"))}</button>`;
+    const kick = (s.kind === "ai" || (!isHostSlot && s.token)) ? `<button class="btn tiny" data-slot="${s.index}" data-slot-act="kick">${t("lobby.kick")}</button>` : "";
+    const tag = s.kind === "ai" ? `<span class="badge">${t("lobby.aiPlayer")} · ${t("menu." + (s.ai || "normal"))}</span>` : `<span class="hero">${t("menu.heroCommander")}</span>`;
+    // The host readies up from its own row; other humans show a ready badge.
+    const ready = s.kind === "human"
+      ? (isHostSlot
+        ? `<button class="btn tiny ${s.ready ? "primary" : ""}" data-slot="${s.index}" data-slot-act="ready">${s.ready ? t("lobby.ready") : t("lobby.notReady")}</button>`
+        : `<span class="badge ${s.ready ? "ok" : ""}">${s.ready ? t("lobby.ready") : t("lobby.notReady")}</span>`)
+      : "";
+    return `<div class="slot ${s.kind}">
+      <span class="slot-dot" style="background:${color}"></span>
+      <span class="slot-name">${name}${isHostSlot ? " (" + t("lobby.you") + ")" : ""}</span>
+      ${tag}
+      <span class="slot-right">${moveBtn}${ready}${kick}</span>
+    </div>`;
+  }
+
+  // A copyable "local link" for this device, shown in the Local connection panel. In a browser the
+  // host cannot accept remote devices (no server), so this is the page's own address — handy for
+  // re-opening on this machine; true cross-device LAN still needs host.bat (see the note below it).
+  private localLinkHtml(): string {
+    let url = "";
+    try { url = window.location.origin + window.location.pathname; } catch { url = ""; }
+    if (!url || url.startsWith("file")) return "";
+    return `<div class="join-url" style="margin-top:8px"><label>${t("lobby.localLink")}</label>
+      <div class="url-row"><code data-id="l-localurl">${this.escAttr(url)}</code><button class="btn tiny" data-id="l-localcopy">${t("lobby.copy")}</button></div>
+    </div>`;
+  }
+  private wireLocalLink(scr: HTMLElement): void {
+    const code = scr.querySelector("[data-id=l-localurl]") as HTMLElement | null;
+    const btn = scr.querySelector("[data-id=l-localcopy]") as HTMLElement | null;
+    if (!code || !btn) return;
+    btn.onclick = () => navigator.clipboard?.writeText(code.textContent || "")
+      .then(() => { btn.textContent = t("lobby.copied"); setTimeout(() => { btn.textContent = t("lobby.copy"); }, 1500); })
+      .catch(() => { /* clipboard may be unavailable over plain http */ });
   }
 
   private splitInputHtml(): string {
@@ -318,7 +493,7 @@ export class Menu {
     } else {
       locals = localIds.map((pid) => ({ playerId: pid, pointerType: null, keyboard: true, control: "single" }));
     }
-    const cfg: SessionConfig = { map: lobby.state.map, players, locals, split, showRematch: true, onQuit: () => this.showTitle() };
+    const cfg: SessionConfig = { map: lobby.state.map, players, locals, split, showRematch: true, gameType: lobby.state.gameType, onQuit: () => this.showTitle() };
     this.lobby = null;
     this.root.innerHTML = "";
     this.cb.onStartLocal(cfg);

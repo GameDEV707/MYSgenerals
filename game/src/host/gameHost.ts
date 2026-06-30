@@ -277,9 +277,13 @@ export class GameHost {
       case "setHero": this.lobby.setHero(session.slotIndex, action.hero); break;
       case "ready": this.lobby.setReady(session.slotIndex, action.ready); break;
       case "setName": this.lobby.setName(session.slotIndex, action.name); break;
+      case "setTeam": this.lobby.setTeam(session.slotIndex, action.team); break;
       // host-only:
       case "setMap": if (isHost) this.lobby.setMap(action.map); break;
       case "addAI": if (isHost) this.lobby.addAI(action.diff); break;
+      case "addAITeam": if (isHost) this.lobby.addAITeam(action.team, action.diff); break;
+      case "setGameType": if (isHost) this.lobby.setGameType(action.gameType); break;
+      case "setTeamColor": if (isHost) this.lobby.setTeamColor(action.team, action.color); break;
       case "removeSlot": if (isHost) this.lobby.removeSlot(action.index); break;
       case "openSlot": if (isHost) this.lobby.openSlot(action.index); break;
       case "closeSlot": if (isHost) this.lobby.closeSlot(action.index); break;
@@ -310,16 +314,16 @@ export class GameHost {
     participants.forEach((p, i) => idMap.set(p.index, i));
 
     const mkPlayer = (slot: typeof participants[0], id: number): PlayerState => ({
-      id, silver: 15, iron: 0, gold: 0, color: slot.color, isAI: slot.kind === "ai",
-      aiDiff: slot.ai || "normal", defeated: false,
+      id, silver: 15, iron: 0, gold: 0, color: this.lobby.state.gameType === "team" ? this.lobby.state.teamColors[(slot.team ?? 0) === 1 ? 1 : 0] : slot.color,
+      isAI: slot.kind === "ai", aiDiff: slot.ai || "normal",
+      team: this.lobby.state.gameType === "team" ? (slot.team ?? 0) : -1, defeated: false,
       powerGen: 0, powerUse: 0, brownout: false, heroId: 0, heroLevel: 1, heroXp: 0, heroRespawnAt: 0,
       research: { weapons: 0, armor: 0, factoryTech: 0, logistics: false },
       unitsBuilt: 0, unitsLost: 0, buildingsDestroyed: 0,
     });
 
     participants.forEach((slot, i) => world.addPlayer(mkPlayer(slot, i)));
-    participants.forEach((_, i) => world.spawnBase(i, map.spawns[i]));
-    world.setupNeutrals();
+    world.spawnAllBases(this.lobby.state.gameType);
 
     this.matchHost = new MatchHost(world);
     participants.forEach((slot, i) => { if (slot.kind === "ai") this.matchHost!.addAIPlayer(i); });
@@ -327,8 +331,11 @@ export class GameHost {
     const startMsg = (you: number): ServerMsg => ({
       m: "start",
       map: this.lobby.state.map,
+      gameType: this.lobby.state.gameType,
       players: participants.map((slot, i) => ({
-        id: i, color: slot.color, isAI: slot.kind === "ai", aiDiff: slot.ai || "normal", hero: slot.hero,
+        id: i, color: this.lobby.state.gameType === "team" ? this.lobby.state.teamColors[(slot.team ?? 0) === 1 ? 1 : 0] : slot.color,
+        isAI: slot.kind === "ai", aiDiff: slot.ai || "normal", hero: slot.hero,
+        team: this.lobby.state.gameType === "team" ? (slot.team ?? 0) : -1,
       })),
       you,
     });

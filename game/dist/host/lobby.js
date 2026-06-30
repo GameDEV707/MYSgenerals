@@ -3,6 +3,8 @@
 // locally-hosted game (M1); the Node server reuses the exact same logic for LAN lobbies (M2).
 import { getMap } from "../sim/map.js";
 export const PALETTE = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc"];
+// Default side colours for custom-team mode: [0] = blue side, [1] = red side. Editable in the lobby.
+export const TEAM_COLORS = ["#4ea3ff", "#ff5a4d"];
 function randomRoomCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous chars
     let s = "";
@@ -21,11 +23,14 @@ export class Lobby {
         const slots = [];
         for (let i = 0; i < max; i++) {
             slots.push(i === 0
-                ? { index: 0, kind: "human", name: "Host", color: PALETTE[0], hero: 0, ready: false }
-                : { index: i, kind: "open", name: "", color: PALETTE[i % PALETTE.length], hero: 0, ready: false });
+                ? { index: 0, kind: "human", name: "Host", color: PALETTE[0], hero: 0, ready: false, team: 0 }
+                : { index: i, kind: "open", name: "", color: PALETTE[i % PALETTE.length], hero: 0, ready: false, team: i % 2 });
         }
         this.local = slots.map((_, i) => i === 0);
-        this.state = { roomCode, map, slots, hostUrl, splitScreen: false, started: false, countdown: 0 };
+        this.state = {
+            roomCode, map, slots, hostUrl, splitScreen: false, started: false, countdown: 0,
+            gameType: "classic", teamColors: [TEAM_COLORS[0], TEAM_COLORS[1]],
+        };
     }
     maxFor(map) { return getMap(map).spawns.length; }
     changed() { this.onChange?.(this.state); }
@@ -37,7 +42,7 @@ export class Lobby {
         const slots = this.state.slots.slice(0, max);
         while (slots.length < max) {
             const i = slots.length;
-            slots.push({ index: i, kind: "open", name: "", color: PALETTE[i % PALETTE.length], hero: 0, ready: false });
+            slots.push({ index: i, kind: "open", name: "", color: PALETTE[i % PALETTE.length], hero: 0, ready: false, team: i % 2 });
         }
         slots.forEach((s, i) => (s.index = i));
         this.state.slots = slots;
@@ -104,6 +109,20 @@ export class Lobby {
         this.local[open.index] = false;
         this.changed();
     }
+    // Custom-team mode: add an AI bound to a specific side (used to fill out a team when there aren't
+    // enough humans). Falls back to the first open slot, capped by the map's player count.
+    addAITeam(team, diff = "normal") {
+        const open = this.state.slots.find((s) => s.kind === "open");
+        if (!open)
+            return;
+        open.kind = "ai";
+        open.ai = diff;
+        open.name = "AI";
+        open.ready = true;
+        open.team = team;
+        this.local[open.index] = false;
+        this.changed();
+    }
     removeSlot(index) {
         const s = this.state.slots[index];
         if (!s || index === 0)
@@ -146,6 +165,39 @@ export class Lobby {
         s.name = name;
         this.changed();
     } }
+    // --- custom-team mode ---
+    // Switch between classic (FFA) and custom-team. Entering team mode seeds a balanced split (slots
+    // alternate blue/red); leaving it clears the team assignment (colors revert to the palette).
+    setGameType(gt) {
+        if (this.state.started)
+            return;
+        this.state.gameType = gt;
+        if (gt === "team") {
+            this.state.slots.forEach((s, i) => { if (s.team === undefined)
+                s.team = i % 2; });
+        }
+        this.changed();
+    }
+    // Assign a slot to a side (0 = blue, 1 = red) in custom-team mode.
+    setTeam(index, team) {
+        const s = this.state.slots[index];
+        if (!s)
+            return;
+        s.team = team === 1 ? 1 : 0;
+        this.changed();
+    }
+    // Recolour a side. The two sides must stay visually distinct.
+    setTeamColor(team, color) {
+        const other = team === 0 ? 1 : 0;
+        if (this.state.teamColors[other] === color)
+            return;
+        this.state.teamColors[team === 1 ? 1 : 0] = color;
+        this.changed();
+    }
+    // Participants on a given side (humans + AI).
+    teamMembers(team) {
+        return this.participants().filter((s) => (s.team ?? 0) === team);
+    }
     setSplit(on) {
         if (this.state.slots.length < 2)
             on = false;
@@ -182,11 +234,22 @@ export class Lobby {
         const parts = this.participants();
         if (parts.length < 2)
             return false;
-        return this.humanSlots().every((s) => s.ready);
+        if (!this.humanSlots().every((s) => s.ready))
+            return false;
+        // Custom-team mode also requires both sides to have at least one participant.
+        if (this.state.gameType === "team") {
+            if (this.teamMembers(0).length < 1 || this.teamMembers(1).length < 1)
+                return false;
+        }
+        return true;
     }
     buildPlayers() {
+        const team = this.state.gameType === "team";
         return this.participants().map((s) => ({
-            id: s.index, isAI: s.kind === "ai", aiDiff: s.ai ?? "normal", color: s.color, hero: s.hero,
+            id: s.index, isAI: s.kind === "ai", aiDiff: s.ai ?? "normal", hero: s.hero,
+            team: team ? (s.team ?? 0) : -1,
+            // In team mode every member of a side shares its colour; classic keeps per-slot colours.
+            color: team ? this.state.teamColors[(s.team ?? 0) === 1 ? 1 : 0] : s.color,
         }));
     }
     localPlayerIds() { return this.state.slots.filter((s, i) => this.local[i] && s.kind === "human").map((s) => s.index); }

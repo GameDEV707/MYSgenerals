@@ -57,6 +57,7 @@ export interface PlayerSnap {
   id: number;
   color: string;
   defeated: boolean;
+  team: number;       // team side (0/1) in custom-team mode, -1 in classic (free-for-all)
   // full economy only for the recipient ("you"); enemies omit these to avoid leaking.
   silver?: number; iron?: number; gold?: number;
   powerGen?: number; powerUse?: number; brownout?: boolean;
@@ -81,6 +82,9 @@ export interface Snapshot {
 
 // ---- Lobby protocol (spec §18.3) ----
 export type SlotKind = "open" | "closed" | "human" | "ai";
+// Game type: "classic" = free-for-all, every player has their own base; "team" = two sides
+// (blue/red) share one base each and each player commands their own hero (custom team mode).
+export type GameType = "classic" | "team";
 export interface LobbySlot {
   index: number;
   kind: SlotKind;
@@ -90,6 +94,7 @@ export interface LobbySlot {
   ready: boolean;
   ai?: "easy" | "normal" | "hard";
   ping?: number;
+  team?: number;         // custom-team side (0 = blue, 1 = red); undefined/ignored in classic
   token?: string;        // reconnection token (host-side; not broadcast to others)
 }
 
@@ -101,6 +106,8 @@ export interface LobbyState {
   splitScreen: boolean;  // host runs 2 local players (mouse + touch)
   started: boolean;
   countdown: number;     // seconds remaining (0 = none)
+  gameType: GameType;    // classic (FFA) or custom team (two sides)
+  teamColors: [string, string]; // editable side colors [blue, red] for custom-team mode
 }
 
 // Messages over the wire (WebSocket). Loopback bypasses serialization but uses the same shapes.
@@ -115,20 +122,24 @@ export type LobbyAction =
   | { a: "setHero"; hero: number }
   | { a: "ready"; ready: boolean }
   | { a: "setName"; name: string }
+  | { a: "setTeam"; team: number }
   // host-only actions:
   | { a: "setMap"; map: string }
   | { a: "addAI"; diff: "easy" | "normal" | "hard" }
+  | { a: "addAITeam"; diff: "easy" | "normal" | "hard"; team: number }
   | { a: "removeSlot"; index: number }
   | { a: "openSlot"; index: number }
   | { a: "closeSlot"; index: number }
   | { a: "kick"; index: number }
   | { a: "setSplit"; on: boolean }
+  | { a: "setGameType"; gameType: GameType }
+  | { a: "setTeamColor"; team: number; color: string }
   | { a: "start" };
 
 export type ServerMsg =
   | { m: "welcome"; playerId: number; token: string; you: number }
   | { m: "lobby"; state: LobbyState }
-  | { m: "start"; map: string; players: { id: number; color: string; isAI: boolean; aiDiff: "easy" | "normal" | "hard"; hero: number }[]; you: number }
+  | { m: "start"; map: string; gameType: GameType; players: { id: number; color: string; isAI: boolean; aiDiff: "easy" | "normal" | "hard"; hero: number; team: number }[]; you: number }
   | { m: "snapshot"; data: Snapshot }
   | { m: "event"; data: GameEvent }
   | { m: "pong"; t: number }

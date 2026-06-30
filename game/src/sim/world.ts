@@ -119,6 +119,7 @@ export interface PlayerState {
   color: string;
   isAI: boolean;
   aiDiff: "easy" | "normal" | "hard";
+  team: number;         // custom-team side (0/1); -1 in classic free-for-all
   defeated: boolean;
   powerGen: number; powerUse: number; brownout: boolean;
   heroId: number; heroLevel: number; heroXp: number; heroRespawnAt: number;
@@ -260,10 +261,47 @@ export class World {
     // T31: a starting Engineer (builder) on the field, so the player can build from the first second
     this.spawn("unit", "engineer", owner, spawn.x + 2, spawn.y + 3);
     // hero
-    const hero = this.spawn("unit", "hero", owner, spawn.x + 2, spawn.y + 2);
+    this.spawnHero(owner, spawn.x + 2, spawn.y + 2);
+  }
+
+  // Spawn (or assign) a single hero for an owner. Used both by spawnBase and by custom-team mode,
+  // where extra teammates get ONLY a hero (the team shares one base — spec: custom team).
+  spawnHero(owner: number, x: number, y: number): Entity {
+    const hero = this.spawn("unit", "hero", owner, x, y);
     hero.hero = { mana: 100, maxMana: 100, abilities: [{ rank: 0, cdUntil: 0 }, { rank: 0, cdUntil: 0 }, { rank: 0, cdUntil: 0 }, { rank: 0, cdUntil: 0 }], burstShots: 0, burstBonus: 0, invulnUntil: 0 };
     const p = this.players[owner];
-    p.heroId = hero.id;
+    if (p) p.heroId = hero.id;
+    return hero;
+  }
+
+  // Set up all players' starting positions for the chosen game type. Players must already be added
+  // (this.players populated, ids 0..n-1). Classic = one full base per player at map.spawns[id].
+  // Custom team = each SIDE gets ONE shared base (the team's lowest-id member is the base owner) at
+  // a team spawn, and every other teammate gets only their own hero near that base — so a 2v2 fields
+  // one HQ/mine/engineer per side plus one hero per player, and each player drives only their hero.
+  spawnAllBases(gameType: "classic" | "team" = "classic"): void {
+    if (gameType !== "team" || !this.players.some((p) => p.team >= 0)) {
+      for (let i = 0; i < this.players.length; i++) this.spawnBase(i, this.map.spawns[i] ?? this.map.spawns[0]);
+      this.setupNeutrals();
+      return;
+    }
+    // Group members by side, preserving id order so the lowest-id member leads (gets the base).
+    const sides = new Map<number, number[]>();
+    for (const p of this.players) {
+      const t = p.team >= 0 ? p.team : 0;
+      if (!sides.has(t)) sides.set(t, []);
+      sides.get(t)!.push(p.id);
+    }
+    const teamIds = [...sides.keys()].sort((a, b) => a - b);
+    teamIds.forEach((t, si) => {
+      const members = sides.get(t)!;
+      const spawn = this.map.spawns[si] ?? this.map.spawns[si % this.map.spawns.length];
+      members.forEach((pid, mi) => {
+        if (mi === 0) this.spawnBase(pid, spawn);               // team leader → full shared base + hero
+        else this.spawnHero(pid, spawn.x + 2 + mi, spawn.y + 4); // teammate → only a hero next to the base
+      });
+    });
+    this.setupNeutrals();
   }
 
   setupNeutrals(): void {
@@ -275,6 +313,9 @@ export class World {
   isEnemy(a: Entity, b: Entity): boolean {
     if (a.owner === b.owner) return false;
     if (b.owner === NEUTRAL) return false;
+    // Custom-team mode: players on the same side are allies, not enemies.
+    const pa = this.players[a.owner], pb = this.players[b.owner];
+    if (pa && pb && pa.team >= 0 && pa.team === pb.team) return false;
     return true;
   }
   armorOf(e: Entity): ArmorType {
@@ -1431,13 +1472,26 @@ export class World {
   }
 
   private winCheck(): void {
+    // A "faction" is a custom-team side (team >= 0) or, in classic, the player alone (their own id).
+    // A faction survives only while it still holds a Command Center; when its last CC falls, every
+    // member of that faction is eliminated together (so a team shares its base's fate).
+    const factionOf = (p: PlayerState): string => (p.team >= 0 ? `t${p.team}` : `p${p.id}`);
+    const ccByFaction = new Map<string, boolean>();
+    for (const p of this.players) if (!ccByFaction.has(factionOf(p))) ccByFaction.set(factionOf(p), false);
+    for (const e of this.entities) {
+      if (e.dead || e.type !== "command_center") continue;
+      const p = this.players[e.owner]; if (p) ccByFaction.set(factionOf(p), true);
+    }
     for (const p of this.players) {
       if (p.defeated) continue;
-      const hasCC = this.entities.some((e) => e.owner === p.id && e.type === "command_center" && !e.dead);
-      if (!hasCC) this.eliminate(p.id);
+      if (!ccByFaction.get(factionOf(p))) this.eliminate(p.id);
     }
-    const alive = this.players.filter((p) => !p.defeated);
-    if (alive.length <= 1) this.winner = alive.length === 1 ? alive[0].id : -1;
+    const aliveFactions = new Set<string>();
+    for (const p of this.players) if (!p.defeated) aliveFactions.add(factionOf(p));
+    if (aliveFactions.size <= 1) {
+      const alive = this.players.filter((p) => !p.defeated);
+      this.winner = alive.length >= 1 ? alive[0].id : -1;
+    }
   }
 
   drainEvents(): GameEvent[] { const ev = this.events; this.events = []; return ev; }

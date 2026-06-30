@@ -795,7 +795,11 @@ export class HUD {
 
   private showEnd(): void {
     this.ended = true;
-    const win = this.world.winner === this.world.me;
+    const myTeam = this.world.players[this.world.me]?.team ?? -1;
+    const winnerPv = this.world.winner >= 0 ? this.world.players[this.world.winner] : undefined;
+    // A custom-team victory counts for every member of the winning side, not just the recorded id.
+    const win = this.world.winner === this.world.me
+      || (myTeam >= 0 && !!winnerPv && winnerPv.team === myTeam);
     const p = this.me();
     this.audio.play(win ? "ready" : "alarm");
     const m = this.el(`<div class="endscreen">

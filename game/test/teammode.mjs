@@ -1,5 +1,7 @@
 // MYS Generals — custom-team mode tests: lobby team assignment + buildPlayers, team-aware
-// spawning (shared base + one hero per player), allies (no friendly fire) and team win condition.
+// spawning (shared base + one hero AND one builder Engineer per player), allies (no friendly fire),
+// team win condition, and shared vision + shared economy/control (a teammate driving the team's
+// engineer and building into the one shared base).
 // Run: NODE_OPTIONS="" node test/teammode.mjs
 import { Lobby } from "../dist/host/lobby.js";
 import { World } from "../dist/sim/world.js";
@@ -96,6 +98,36 @@ assert(you1.silver === 123, "teammate sees the SIDE's shared economy (base owner
 const enemyCC = w2.entities.find((e) => e.type === "command_center" && e.owner === 2);
 const enemyTileVisible = grid1[Math.floor(enemyCC.pos.y) * map2.w + Math.floor(enemyCC.pos.x)] === 1;
 assert(!enemyTileVisible, "enemy side's HQ stays hidden (no cross-side vision leak)");
+
+console.log("Teammate drives their OWN engineer and BUILDS into the shared base (the reported bug):");
+// Each non-leader teammate is now spawned their own builder Engineer, owned by the side's base owner
+// (player 0 = the shared economy) so it builds into the one team base while the teammate (player 1)
+// drives it via shared control.
+const sideEngineers = w2.entities.filter((e) => e.type === "engineer" && e.owner === 0 && !e.dead);
+assert(sideEngineers.length >= 2, "the side has a builder for the leader AND one for the teammate (>= 2 engineers)");
+
+// Player 1 (the teammate) commands an ally-owned engineer — the host must NOT silently drop it.
+const eng = sideEngineers[0];
+host.submit({ playerId: 1, clientTick: 1, cmd: { t: "move", ids: [eng.id], x: Math.floor(eng.pos.x) + 6, y: Math.floor(eng.pos.y) + 6 } });
+w2.tick();
+assert(eng.moveTarget !== null, "teammate (player 1) CAN move an ally-owned engineer (host accepts shared control)");
+
+// Player 1 builds a Power Plant next to the shared HQ. The host coerces the owner to the side's base
+// owner (player 0), spends the SHARED wallet and dispatches a side engineer — so the building rises.
+w2.players[0].silver = 999;
+let bx = -1, by = -1;
+for (let r = 2; r <= 7 && bx < 0; r++) {
+  for (let dy = -r; dy <= r && bx < 0; dy++) for (let dx = -r; dx <= r && bx < 0; dx++) {
+    const tx = Math.floor(leaderCC.pos.x) + dx, ty = Math.floor(leaderCC.pos.y) + dy;
+    if (w2.placementValid(0, "power_plant", tx, ty)) { bx = tx; by = ty; }
+  }
+}
+assert(bx >= 0, "a valid build spot exists next to the shared HQ");
+host.submit({ playerId: 1, clientTick: 2, cmd: { t: "build", owner: 1, building: "power_plant", x: bx, y: by } });
+w2.tick();
+const newPP = w2.entities.find((e) => e.type === "power_plant" && !e.dead);
+assert(!!newPP, "teammate's build actually places a building (was silently dropped before the fix)");
+assert(newPP && newPP.owner === 0, "the teammate's building is owned by / charged to the side's shared base owner");
 
 console.log("");
 if (failures === 0) { console.log("ALL TEAM-MODE TESTS PASSED ✓"); process.exit(0); }

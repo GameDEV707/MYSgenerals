@@ -65,12 +65,22 @@ export class MatchHost implements CommandSink {
   }
 
   // Validate ownership and coerce owner fields so a client can only act on its own things.
+  //
+  // Custom-team co-op (spec §24): a side shares ONE base/economy and shared control, so a command may
+  // target any unit/building owned by ANY member of the issuer's side, and a `build` is charged to
+  // (and owned by) the side's shared base owner — exactly what the team-aware client already assumes
+  // (WorldView.isAlly / WorldView.economyOwner). In classic free-for-all (team < 0) `teamIds(pid)` is
+  // just [pid] and `economyOwner(pid)` is `pid`, so every check collapses to the original strict
+  // `owner === pid` behaviour with no change. (This is the fix for the reported bug where a 2nd
+  // teammate could neither drive the team's engineer nor build anything: the host was silently
+  // dropping every command they issued against the shared base/engineer.)
   private sanitize(pid: number, cmd: Command): Command | null {
+    const side = new Set(this.teamIds(pid));
     const ownsUnit = (id: number): boolean => {
-      const e = this.world.byId.get(id); return !!e && e.owner === pid && !e.dead && e.kind === "unit";
+      const e = this.world.byId.get(id); return !!e && side.has(e.owner) && !e.dead && e.kind === "unit";
     };
     const ownsBuilding = (id: number): boolean => {
-      const e = this.world.byId.get(id); return !!e && e.owner === pid && !e.dead && e.kind === "building";
+      const e = this.world.byId.get(id); return !!e && side.has(e.owner) && !e.dead && e.kind === "building";
     };
     switch (cmd.t) {
       case "move": case "attackmove": case "stop": case "hold": case "mine": case "capture": case "attack": {
@@ -78,14 +88,14 @@ export class MatchHost implements CommandSink {
         if (ids.length === 0) return null;
         return { ...cmd, ids };
       }
-      case "build": return { ...cmd, owner: pid };
+      case "build": return { ...cmd, owner: this.economyOwner(pid) };
       case "train": case "cancel": case "rally": case "sell":
         return ownsBuilding(cmd.building) ? cmd : null;
       case "upgradeBuilding": case "research": case "cancelResearch":
         return ownsBuilding(cmd.building) ? cmd : null;
       case "ability": {
         const h = this.world.byId.get(cmd.hero);
-        return h && h.owner === pid && !!h.hero && !h.dead ? cmd : null;
+        return h && side.has(h.owner) && !!h.hero && !h.dead ? cmd : null;
       }
       case "surrender": return { t: "surrender", owner: pid };
       default: return null;

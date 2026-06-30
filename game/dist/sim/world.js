@@ -190,8 +190,8 @@ export class World {
     // Set up all players' starting positions for the chosen game type. Players must already be added
     // (this.players populated, ids 0..n-1). Classic = one full base per player at map.spawns[id].
     // Custom team = each SIDE gets ONE shared base (the team's lowest-id member is the base owner) at
-    // a team spawn, and every other teammate gets only their own hero near that base — so a 2v2 fields
-    // one HQ/mine/engineer per side plus one hero per player, and each player drives only their hero.
+    // a team spawn; every other teammate gets their OWN hero AND their OWN builder Engineer near that
+    // base — so a 2v2 fields one HQ/mine per side, one hero per player, and a builder for each player.
     spawnAllBases(gameType = "classic") {
         if (gameType !== "team" || !this.players.some((p) => p.team >= 0)) {
             for (let i = 0; i < this.players.length; i++)
@@ -211,11 +211,18 @@ export class World {
         teamIds.forEach((t, si) => {
             const members = sides.get(t);
             const spawn = this.map.spawns[si] ?? this.map.spawns[si % this.map.spawns.length];
+            const leader = members[0]; // the side's shared-base owner (holds the CC + the shared economy)
             members.forEach((pid, mi) => {
-                if (mi === 0)
-                    this.spawnBase(pid, spawn); // team leader → full shared base + hero
-                else
-                    this.spawnHero(pid, spawn.x + 2 + mi, spawn.y + 4); // teammate → only a hero next to the base
+                if (mi === 0) {
+                    this.spawnBase(pid, spawn);
+                    return;
+                } // team leader → full shared base + hero
+                // Teammate → their OWN hero, PLUS their OWN builder Engineer. The engineer is owned by the
+                // side's base owner (the shared economy), so anything it builds joins the single team base
+                // and is charged to the shared wallet — while the teammate still drives it (allies share
+                // control, see MatchHost.sanitize). This lets every teammate build, not just the leader.
+                this.spawnHero(pid, spawn.x + 2 + mi, spawn.y + 4);
+                this.spawn("unit", "engineer", leader, spawn.x + 3 + mi, spawn.y + 4);
             });
         });
         this.setupNeutrals();

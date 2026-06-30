@@ -16,6 +16,19 @@ The game runs in any modern browser. It must be served over HTTP (opening
 The compiled `dist/` is included, so **you don't need to build anything to play** —
 you only need a way to serve the folder.
 
+### Easiest: one-click setup
+
+If you just want it to work, run the installer once — it checks for and installs
+anything missing (Node.js, and the TypeScript compiler if you ever want to rebuild),
+then prepares the game for you:
+
+- **Windows:** double-click **`installer.bat`**
+- **macOS / Linux:** `./installer.sh`
+
+When it finishes you can play with `run.bat` / `./run.sh` (it can also start the game
+for you right away). The installer is safe to re-run — it only installs what you're
+missing.
+
 ### Windows
 
 Requires [Node.js](https://nodejs.org) (the only dependency). Then either:
@@ -281,6 +294,7 @@ option is still available from the main menu as a fallback.
 game/
 ├─ index.html, styles.css        # shell + UI styling
 ├─ serve.mjs                     # zero-dependency static server for LOCAL play (Node built-ins only)
+├─ installer.bat, installer.sh   # one-click setup: installs missing deps (Node/TypeScript) + builds
 ├─ run.bat, run.ps1, run.sh      # local-play launchers (Windows / PowerShell / Unix), port 8000
 ├─ launch.mjs                    # starts the LAN host server + opens the host's browser
 ├─ host.bat, host.sh, host.command  # one-click LAN multiplayer host (Win / Linux / macOS), port 3000

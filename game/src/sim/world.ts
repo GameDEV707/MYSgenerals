@@ -15,7 +15,7 @@ import {
   MAX_BASE_LEVEL, CC_UPGRADE_COSTS, CC_UPGRADE_TIMES, REQUIRED_BASE_LEVEL, MAX_DEFENSE_LEVEL,
   DEFENSE_RANGE_PER_LEVEL, DEFENSE_DAMAGE_PER_LEVEL, defenseUpgradeCost, upgradeTime,
   mineSlotCap, isMineType, DERRICK_CAPTURE_TIME, OUTPOST_CAPTURE_TIME, OUTPOST_CAPTURE_RADIUS,
-  OUTPOST_CAPTURE_BOUNTY,
+  OUTPOST_CAPTURE_BOUNTY, MAX_RADAR_LEVEL, RADAR_VISION,
 } from "../constants.js";
 import { NavGrid, findPath, nearestFree } from "./grid.js";
 import { GameMap } from "./map.js";
@@ -64,6 +64,9 @@ export class Entity {
   mineRetry = 0; // T32 D1: consecutive failed attempts to reach an assigned mine (stuck recovery)
   buildTask: { bid: BuildingId; pos: Vec2; entId: number } | null = null;
   captureTask: { target: number } | null = null;
+  // support units (Repair Engineer / Medic): the ally currently being serviced (null = seeking).
+  healTargetId: number | null = null;
+  healFxCd = 0; // throttles the heal-beam visual event so it isn't emitted every tick
   // building
   isBuilding = false;
   constructing = false;
@@ -156,6 +159,7 @@ export interface Projectile {
 export type GameEvent =
   | { e: "fire"; from: Vec2; to: Vec2; kind: ProjectileKind; owner: number; speed: number; arc: boolean; shots: number; shotDelay: number }
   | { e: "impact"; pos: Vec2; kind: ProjectileKind; size: number }
+  | { e: "heal"; from: Vec2; to: Vec2; owner: number; kind: "repair" | "medic" }
   | { e: "death"; pos: Vec2; kind: string; owner: number }
   | { e: "float"; pos: Vec2; text: string; color: string }
   | { e: "construct"; pos: Vec2 }
@@ -298,7 +302,7 @@ export class World {
       case "move": case "attackmove": {
         for (const id of cmd.ids) {
           const e = this.byId.get(id); if (!e || e.kind !== "unit" || e.dead) continue;
-          e.target = null; e.captureTask = null; e.mining = false; e.mineId = null;
+          e.target = null; e.captureTask = null; e.mining = false; e.mineId = null; e.healTargetId = null;
           if (cmd.t === "attackmove") { e.stance = "attackmove"; e.attackMoveTarget = { x: cmd.x, y: cmd.y }; }
           else { e.stance = "aggressive"; e.attackMoveTarget = null; }
           this.setMove(e, cmd.x, cmd.y);
@@ -308,12 +312,12 @@ export class World {
       case "attack": {
         for (const id of cmd.ids) {
           const e = this.byId.get(id); if (!e || e.kind !== "unit" || e.dead) continue;
-          e.target = cmd.target; e.stance = "aggressive"; e.captureTask = null;
+          e.target = cmd.target; e.stance = "aggressive"; e.captureTask = null; e.healTargetId = null;
         }
         break;
       }
-      case "stop": for (const id of cmd.ids) { const e = this.byId.get(id); if (e) { e.path = []; e.moveTarget = null; e.target = null; } } break;
-      case "hold": for (const id of cmd.ids) { const e = this.byId.get(id); if (e) { e.stance = "hold"; e.path = []; e.moveTarget = null; } } break;
+      case "stop": for (const id of cmd.ids) { const e = this.byId.get(id); if (e) { e.path = []; e.moveTarget = null; e.target = null; e.healTargetId = null; } } break;
+      case "hold": for (const id of cmd.ids) { const e = this.byId.get(id); if (e) { e.stance = "hold"; e.path = []; e.moveTarget = null; e.healTargetId = null; } } break;
       case "mine": {
         const mine = this.byId.get(cmd.target);
         if (!mine || !isMineType(mine.type)) break; // T30: any mine type (silver/iron/gold/captured oil)
@@ -493,9 +497,10 @@ export class World {
   tryUpgradeLevel(b: Entity, def: typeof BUILDING_DEFS[BuildingId], p: PlayerState): void {
     if (b.upgrading) return; // one upgrade at a time
     const isCC = b.type === "command_center";
+    const isRadar = b.type === "radar";
     const isDefense = !!def.weapon && !def.produces && !def.isWall; // guard/cannon/rocket towers
-    if (!isCC && !isDefense) return;
-    const maxLvl = isCC ? MAX_BASE_LEVEL : MAX_DEFENSE_LEVEL;
+    if (!isCC && !isDefense && !isRadar) return;
+    const maxLvl = isCC ? MAX_BASE_LEVEL : isRadar ? MAX_RADAR_LEVEL : MAX_DEFENSE_LEVEL;
     if (b.level >= maxLvl) return;
     const cost = isCC ? CC_UPGRADE_COSTS[b.level - 1] : defenseUpgradeCost(def.cost);
     if (!this.canAfford(p, cost)) { this.events.push({ e: "toast", key: this.shortfallKey(p, cost), kind: "danger", to: b.owner }); return; }
@@ -603,6 +608,8 @@ export class World {
     this.economySystem();
     this.productionSystem();
     this.workerSystem();
+    this.healSystem();
+    this.idleWorkerSystem();
     this.movementSystem();
     this.combatSystem();
     this.projectileSystem();
@@ -701,6 +708,8 @@ export class World {
         e.upgrading.progress += TICK_DT / e.upgrading.time;
         if (e.upgrading.progress >= 1) {
           e.level = e.upgrading.to; e.upgrading = null;
+          // Radar's reveal radius grows with its level (it has no weapon — vision IS its upgrade).
+          if (e.type === "radar") e.vision = RADAR_VISION[Math.min(RADAR_VISION.length - 1, e.level - 1)];
           this.events.push({ e: "rankup", pos: e.pos });
           this.events.push({ e: "toast", key: "toast.upgradeComplete", kind: "ok", params: { name: BUILDING_DEFS[e.type as BuildingId].nameKey, lvl: e.level }, to: e.owner });
         }
@@ -712,9 +721,11 @@ export class World {
     const free = nearestFree(this.grid, Math.floor(b.pos.x), Math.floor(b.pos.y + b.radius + 1)) || { x: Math.floor(b.pos.x), y: Math.floor(b.pos.y) };
     const u = this.spawn("unit", unit, b.owner, free.x, free.y);
     this.players[b.owner].unitsBuilt++;
-    const rally = b.rally;
-    if (rally) this.setMove(u, rally.x, rally.y);
-    else if (unit === "miner") this.autoAssignMiner(u);
+    // A Miner always goes to work a free mine on spawn (the rally "flag" only governs where it idles
+    // when there is NO free mine — handled in idleWorkerSystem). Every other unit honours the
+    // building's rally flag: combat units / healers gather there; without a flag they stay put.
+    if (unit === "miner") this.autoAssignMiner(u);
+    else if (b.rally) this.setMove(u, b.rally.x, b.rally.y);
     this.events.push({ e: "toast", key: "toast.unitReadyNamed", kind: "ok", params: { unit: UNIT_DEFS[unit].nameKey }, to: b.owner });
   }
 
@@ -821,6 +832,98 @@ export class World {
     }
     if (!chosen && cands.length) chosen = cands[0]; // none provably reachable → try the nearest anyway
     if (chosen) { m.mineId = chosen.id; m.mining = false; m.inMine = false; m.mineRetry = 0; this.setMove(m, chosen.pos.x, chosen.pos.y); }
+  }
+
+  // ---------- support units: auto-heal / auto-repair ----------
+  // The owner's primary (built, non-constructing) Command Center — the workers' "home" and the
+  // fallback gather point when no rally flag is set.
+  private ownerCC(owner: number): Entity | undefined {
+    return this.entities.find((e) => e.owner === owner && e.type === "command_center" && !e.dead && !e.constructing);
+  }
+
+  // Can support unit `e` (with heal ability `kind`) service target `t`? Only friendly, alive,
+  // damaged targets of the right class. "mechanical" → tanks/robots (VehicleHeavy units) + defensive
+  // towers/radar (combat or sensor structures); "infantry" → foot soldiers (InfantryLight units that
+  // carry a weapon — workers and other support units are excluded).
+  private healable(kind: "mechanical" | "infantry", e: Entity, t: Entity): boolean {
+    if (t.dead || t.owner !== e.owner || t.id === e.id) return false;
+    if (t.hp >= t.maxHp) return false;
+    if (t.constructing) return false;
+    if (kind === "mechanical") {
+      if (t.kind === "unit") return this.armorOf(t) === "VehicleHeavy" && t.type !== "hero";
+      if (t.kind === "building") {
+        const d = BUILDING_DEFS[t.type as BuildingId];
+        return (!!d.weapon && !d.produces && !d.isWall) || t.type === "radar"; // towers + radar
+      }
+      return false;
+    }
+    // infantry medic: wounded foot soldiers (light armour + a weapon)
+    return t.kind === "unit" && this.armorOf(t) === "InfantryLight" && !!t.weaponDef;
+  }
+
+  private healSystem(): void {
+    for (const e of this.entities) {
+      if (e.kind !== "unit" || e.dead) continue;
+      const heal = UNIT_DEFS[e.type as UnitId].heal;
+      if (!heal) continue;
+      if (e.healFxCd > 0) e.healFxCd -= TICK_DT;
+      // validate / drop the current target
+      let tgt = e.healTargetId != null ? this.byId.get(e.healTargetId) : undefined;
+      if (tgt && !this.healable(heal.targets, e, tgt)) { tgt = undefined; e.healTargetId = null; }
+      // no target → seek the nearest damaged serviceable ally within range (only while idle, so a
+      // player move/attack order isn't overridden).
+      if (!tgt) {
+        if (e.path.length === 0 && e.moveTarget == null && e.stance !== "hold") {
+          const found = this.nearestHealTarget(e, heal);
+          if (found) { e.healTargetId = found.id; this.setMove(e, found.pos.x, found.pos.y); }
+        }
+        continue;
+      }
+      const reach = tgt.radius + e.radius + 1.0;
+      const d = this.dist(e.pos, tgt.pos);
+      if (d > reach) {
+        // walk to the patient (refresh the path if it has run out)
+        if (e.path.length === 0) { e.repathTimer -= TICK_DT; if (e.repathTimer <= 0) { this.setMove(e, tgt.pos.x, tgt.pos.y); e.repathTimer = 0.4; } }
+        continue;
+      }
+      // in range → stop and restore HP gradually
+      e.path = []; e.moveTarget = null;
+      e.facing = Math.atan2(tgt.pos.y - e.pos.y, tgt.pos.x - e.pos.x);
+      tgt.hp = Math.min(tgt.maxHp, tgt.hp + heal.rate * TICK_DT);
+      if (e.healFxCd <= 0) {
+        this.events.push({ e: "heal", from: { ...e.pos }, to: { ...tgt.pos }, owner: e.owner, kind: heal.targets === "mechanical" ? "repair" : "medic" });
+        this.events.push({ e: "float", pos: { x: tgt.pos.x, y: tgt.pos.y - tgt.radius }, text: "+", color: heal.targets === "mechanical" ? "#7ad7ff" : "#34d399" });
+        e.healFxCd = 0.25;
+      }
+      if (tgt.hp >= tgt.maxHp) e.healTargetId = null; // fully restored → seek the next patient
+    }
+  }
+
+  private nearestHealTarget(e: Entity, heal: { range: number; targets: "mechanical" | "infantry" }): Entity | undefined {
+    let best: Entity | undefined; let bd = heal.range;
+    for (const o of this.entities) {
+      if (!this.healable(heal.targets, e, o)) continue;
+      const d = this.dist(e.pos, o.pos);
+      if (d <= bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
+  // ---------- idle workers: gather at the Command Center's rally "flag" (or near the CC) ----------
+  // A Miner with no free mine to work, or an Engineer with no build/capture task, walks to the
+  // owner's Command Center rally point if a flag is set, otherwise loiters around the Command Center.
+  private idleWorkerSystem(): void {
+    for (const e of this.entities) {
+      if (e.dead || e.kind !== "unit") continue;
+      if (e.type !== "miner" && e.type !== "engineer") continue;
+      if (e.type === "miner" && (e.mining || e.inMine || e.mineId != null)) continue;
+      if (e.type === "engineer" && (e.buildTask || e.captureTask)) continue;
+      if (e.path.length > 0 || e.moveTarget != null) continue; // already moving / tasked
+      const cc = this.ownerCC(e.owner); if (!cc) continue;
+      const dest = cc.rally ?? cc.pos;
+      const arriveR = cc.rally ? 2.5 : cc.radius + 3;
+      if (this.dist(e.pos, dest) > arriveR) this.setMove(e, dest.x, dest.y);
+    }
   }
 
   // ---------- movement (spec §8.5) ----------

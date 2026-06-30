@@ -310,6 +310,7 @@ export class MatchHost {
             case "shake":
             case "flash": return true; // global screen effects (no entity info leaked)
             case "fire": return ev.owner === pid || this.visAt(grid, ev.from.x, ev.from.y) || this.visAt(grid, ev.to.x, ev.to.y);
+            case "heal": return ev.owner === pid || this.visAt(grid, ev.from.x, ev.from.y) || this.visAt(grid, ev.to.x, ev.to.y);
             case "impact": return this.visAt(grid, ev.pos.x, ev.pos.y);
             case "death": return ev.owner === pid || this.visAt(grid, ev.pos.x, ev.pos.y);
             case "capture":

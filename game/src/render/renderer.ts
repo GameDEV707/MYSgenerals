@@ -33,6 +33,8 @@ export interface UnitShape {
 const SHAPES: Record<UnitId, UnitShape> = {
   miner:          { type: "miner",          chassis: "infantry", body: "roundsquare", arm: "none",     glyph: "▲", combat: false, accent: false, skirt: false, recoil: false, dish: false, bodyScale: 1.0 },
   engineer:       { type: "engineer",       chassis: "infantry", body: "round",       arm: "none",     glyph: "✚", combat: false, accent: true,  skirt: false, recoil: false, dish: false, bodyScale: 1.0 },
+  repair_engineer:{ type: "repair_engineer",chassis: "infantry", body: "roundsquare", arm: "none",     glyph: "⛭", combat: false, accent: true,  skirt: false, recoil: false, dish: false, bodyScale: 1.05 },
+  medic:          { type: "medic",          chassis: "infantry", body: "round",       arm: "none",     glyph: "✛", combat: false, accent: true,  skirt: false, recoil: false, dish: false, bodyScale: 1.0 },
   infantry:       { type: "infantry",       chassis: "infantry", body: "round",       arm: "rifle",    glyph: "",  combat: true,  accent: false, skirt: false, recoil: false, dish: false, bodyScale: 1.0 },
   rocket_soldier: { type: "rocket_soldier", chassis: "infantry", body: "round",       arm: "launcher", glyph: "",  combat: true,  accent: false, skirt: false, recoil: false, dish: false, bodyScale: 1.0 },
   robot:          { type: "robot",          chassis: "infantry", body: "heavy",       arm: "core",     glyph: "",  combat: true,  accent: false, skirt: false, recoil: false, dish: false, bodyScale: 1.25 },
@@ -324,6 +326,11 @@ export class Renderer {
       ctx.beginPath(); ctx.moveTo(this.toX(e.pos.x), this.toY(e.pos.y));
       ctx.lineTo(this.toX(e.pos.x) + Math.cos(e.turret) * s * 0.45, this.toY(e.pos.y) + Math.sin(e.turret) * s * 0.45); ctx.stroke();
     }
+    // Radar: an auto-rotating dish (purely cosmetic, driven by wall-clock sim time) sweeping for
+    // enemies. Its level pip + reveal ring are handled by the generic overlay/selection code below.
+    if (e.type === "radar" && !e.constructing) {
+      this.drawRadarDish(this.toX(e.pos.x), this.toY(e.pos.y), s * 0.42);
+    }
     // T27 Part B: a single ordered overlay stack — the HP bar and ONE secondary bar (construction,
     // production head-item, or research; mutually exclusive) share fixed, non-overlapping slots.
     const slots = entityOverlayLayout(y, this._ov);
@@ -350,6 +357,15 @@ export class Renderer {
       const atk = (def.weapon.range + (e.level - 1) * DEFENSE_RANGE_PER_LEVEL) * z;
       this.drawRangeRing(this.toX(e.pos.x), this.toY(e.pos.y), def.vision * z, "rgba(120,180,255,0.18)");
       this.drawRangeRing(this.toX(e.pos.x), this.toY(e.pos.y), atk, "rgba(255,90,70,0.5)");
+    }
+    // Radar reveal ring: when selected, show the area it scouts (its leveled vision radius).
+    if (this.selection.has(e.id) && e.type === "radar" && !e.constructing) {
+      this.drawRangeRing(this.toX(e.pos.x), this.toY(e.pos.y), e.vision * z, "rgba(120,200,255,0.45)");
+    }
+    // Rally "flag": for a selected OWN building with a rally point, draw a flag at the point and a
+    // dashed guide line from the building to it (HQ workers / produced units gather there).
+    if (e.owner === this.world.me && this.selection.has(e.id) && e.rally) {
+      this.drawRallyFlag(e.rally.x, e.rally.y, e.pos.x, e.pos.y);
     }
     // T30: building level pip (L2 / L3) for upgraded Command Centers and towers (own info).
     if (e.level > 1) {
@@ -608,6 +624,42 @@ export class Renderer {
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  // Auto-rotating radar dish: a sweeping arc + a base post, spun by the sim clock so every radar
+  // continuously scans. `half` is the dish radius in px.
+  private drawRadarDish(cx: number, cy: number, half: number): void {
+    const ctx = this.ctx;
+    const a = (this.world.time * 1.6) % (Math.PI * 2); // sweep angle (rad/s)
+    // sweeping sensor wedge
+    ctx.fillStyle = "rgba(120,200,255,0.18)";
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, half * 1.7, a, a + Math.PI / 3); ctx.closePath(); ctx.fill();
+    // dish: a parabola-ish arc facing the sweep direction
+    ctx.strokeStyle = "#9fd6ff"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, half, a + Math.PI * 0.6, a + Math.PI * 1.4); ctx.stroke();
+    // dish mast + hub
+    ctx.strokeStyle = "#cfd8e0"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * half, cy + Math.sin(a) * half); ctx.stroke();
+    ctx.fillStyle = "#cfd8e0"; ctx.beginPath(); ctx.arc(cx, cy, half * 0.22, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Rally "flag" marker drawn in world space: a dashed guide line from the building to the rally
+  // point, then a small pole + team-coloured pennant at the point.
+  private drawRallyFlag(rx: number, ry: number, bx: number, by: number): void {
+    const ctx = this.ctx, z = this.cam.zoom;
+    const fx = this.toX(rx), fy = this.toY(ry);
+    ctx.strokeStyle = "rgba(52,211,153,0.55)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(this.toX(bx), this.toY(by)); ctx.lineTo(fx, fy); ctx.stroke();
+    ctx.setLineDash([]);
+    // pole
+    ctx.strokeStyle = "#e6edf3"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - z * 0.9); ctx.stroke();
+    // pennant
+    ctx.fillStyle = "#34d399";
+    ctx.beginPath(); ctx.moveTo(fx, fy - z * 0.9); ctx.lineTo(fx + z * 0.5, fy - z * 0.74); ctx.lineTo(fx, fy - z * 0.58); ctx.closePath(); ctx.fill();
+    // base dot
+    ctx.fillStyle = "rgba(52,211,153,0.9)"; ctx.beginPath(); ctx.arc(fx, fy, 2.5, 0, Math.PI * 2); ctx.fill();
   }
 
   private drawMineRing(cx: number, cy: number, r: number, progress: number, color: string): void {

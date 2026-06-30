@@ -5,6 +5,7 @@ export class InputController {
     constructor(r, world, audio, opts) {
         this.pendingAbility = -1; // -1 none, 0..3 slot awaiting target
         this.pendingAttackMove = false;
+        this.pendingRally = false; // armed by the HUD "Flag" button — next map click sets the rally point
         this.paused = false;
         // pointer-type this controller listens to (spec §21.2). null = any (single-player).
         this.pointerType = null;
@@ -108,6 +109,12 @@ export class InputController {
                 this.r.fx.addCmdMarker(w.x, w.y, "attack", "#ffa726");
             }
             this.pendingAttackMove = false;
+            this.updatePointerHint();
+            return;
+        }
+        if (this.pendingRally) {
+            this.setRallyAt(w.x, w.y);
+            this.pendingRally = false;
             this.updatePointerHint();
             return;
         }
@@ -328,9 +335,26 @@ export class InputController {
         }
         return ids;
     }
+    // Set the rally "flag" for every selected own building (HQ / Barracks / War Factory). Workers idle
+    // there when they have no job; produced combat units / healers gather there.
+    setRallyAt(wx, wy) {
+        let any = false;
+        for (const id of this.r.selection) {
+            const e = this.world.byId.get(id);
+            if (e && e.owner === this.world.me && e.kind === "building") {
+                this.world.send({ t: "rally", building: e.id, x: wx, y: wy });
+                any = true;
+            }
+        }
+        if (any) {
+            this.audio.play("click");
+            this.r.fx.addCmdMarker(wx, wy, "move", "#34d399");
+        }
+    }
     setPlacing(b) {
         this.r.placing = b ? { building: b } : null;
         this.pendingAbility = -1;
+        this.pendingRally = false;
     }
     setAbility(slot) {
         const hero = this.heroEntity();
@@ -348,6 +372,7 @@ export class InputController {
         else {
             this.pendingAbility = slot;
             this.r.placing = null;
+            this.pendingRally = false;
         }
     }
     heroEntity() {
@@ -433,6 +458,11 @@ export class InputController {
         }
         if (this.pendingAbility >= 0) {
             this.castPending(w.x, w.y);
+            return;
+        }
+        if (this.pendingRally) {
+            this.setRallyAt(w.x, w.y);
+            this.pendingRally = false;
             return;
         }
         if (this.pendingAttackMove) {
@@ -527,6 +557,7 @@ export class InputController {
             this.r.placing = null;
             this.pendingAbility = -1;
             this.pendingAttackMove = false;
+            this.pendingRally = false;
             this.onCategoryCancel?.();
             this.cancelCursorSelect();
             return;

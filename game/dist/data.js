@@ -1,3 +1,4 @@
+import { RADAR_VISION } from "./constants.js";
 // Damage-type x armor-type matrix as multipliers (spec §13.1 / §26.3), percentages -> fractions.
 const M = {
     Bullet: { InfantryLight: 1.00, VehicleHeavy: 0.25, StructureArmored: 0.25, AirLight: 0.50 },
@@ -31,8 +32,22 @@ export const UNIT_DEFS = {
     },
     engineer: {
         id: "engineer", nameKey: "units.engineer.name", hp: 80, armor: "InfantryLight", speed: 2.4,
-        vision: 5, cost: { silver: 20 }, buildTime: 18, builtAt: ["command_center", "barracks"],
+        vision: 5, cost: { silver: 20 }, buildTime: 18, builtAt: ["command_center"],
         isWorker: true, radius: 0.35, icon: "🔧",
+    },
+    // "+ Muhandis" (Repair Engineer) — built at the Barracks. It does NOT construct; it auto-seeks the
+    // nearest damaged MECHANICAL ally (tanks, robots, defensive towers) and repairs 100 HP/s.
+    repair_engineer: {
+        id: "repair_engineer", nameKey: "units.repairEngineer.name", hp: 110, armor: "InfantryLight", speed: 2.5,
+        vision: 6, cost: { iron: 5, silver: 25 }, buildTime: 18, builtAt: ["barracks"],
+        heal: { rate: 100, range: 7, targets: "mechanical" }, radius: 0.35, icon: "🛠",
+    },
+    // Medic (Shifokor) — built at the Barracks. Auto-seeks the nearest wounded foot SOLDIER and heals
+    // 50 HP/s (gradually, not all at once).
+    medic: {
+        id: "medic", nameKey: "units.medic.name", hp: 90, armor: "InfantryLight", speed: 2.7,
+        vision: 6, cost: { silver: 30 }, buildTime: 16, builtAt: ["barracks"],
+        heal: { rate: 50, range: 7, targets: "infantry" }, radius: 0.35, icon: "✚",
     },
     infantry: {
         id: "infantry", nameKey: "units.infantry.name", hp: 120, armor: "InfantryLight", speed: 2.8,
@@ -105,7 +120,7 @@ export const BUILDING_DEFS = {
     barracks: {
         id: "barracks", nameKey: "buildings.barracks.name", hp: 1000, power: -2,
         cost: { gold: 1, iron: 10, silver: 30 }, buildTime: 20, footprint: 3,
-        produces: ["infantry", "rocket_soldier", "robot", "engineer"], vision: 5, icon: "🏚", category: "military",
+        produces: ["infantry", "rocket_soldier", "robot", "repair_engineer", "medic"], vision: 5, icon: "🏚", category: "military",
     },
     war_factory: {
         id: "war_factory", nameKey: "buildings.warFactory.name", hp: 1600, power: -4,
@@ -131,6 +146,10 @@ export const BUILDING_DEFS = {
         id: "rocket_tower", nameKey: "buildings.rocketTower.name", hp: 1000, power: -3,
         cost: { gold: 1, iron: 18, silver: 55 }, buildTime: 20, footprint: 2, vision: 8, icon: "📡", category: "defense",
         weapon: { damage: 35, damageType: "Rocket", range: 9, cooldown: 1.6, projectile: "rocket", projectileSpeed: 9, splash: 1.0, shots: 2, shotDelay: 0.1, targetsAir: true, targetsGround: true, preferred: "AirLight" },
+    },
+    radar: {
+        id: "radar", nameKey: "buildings.radar.name", hp: 900, power: -4,
+        cost: { gold: 1, iron: 20, silver: 50 }, buildTime: 22, footprint: 2, vision: RADAR_VISION[0], icon: "🛰", category: "defense",
     },
     wall: {
         id: "wall", nameKey: "buildings.wall.name", hp: 1500, power: 0,
@@ -161,6 +180,6 @@ for (const r of RESEARCH_DEFS)
 export const BUILD_MENU = {
     economy: ["silver_mine", "iron_mine", "gold_mine", "power_plant"],
     military: ["barracks", "war_factory"],
-    defense: ["guard_tower", "cannon_tower", "rocket_tower", "wall"],
+    defense: ["guard_tower", "cannon_tower", "rocket_tower", "radar", "wall"],
     tech: ["research_center"],
 };

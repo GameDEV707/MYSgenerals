@@ -106,6 +106,8 @@ export class AIController {
     if (this.owned("guard_tower").length < 1 && has("barracks") && p.iron >= 8 && p.silver >= 25) { this.build("guard_tower"); return; }
     if (!has("research_center") && has("war_factory") && p.gold >= 2 && p.iron >= 20 && p.silver >= 60) { this.build("research_center"); return; }
     if (this.owned("rocket_tower").length < 1 && baseLvl >= 3 && has("war_factory") && p.gold >= 1 && p.iron >= 18 && p.silver >= 55) { this.build("rocket_tower"); return; }
+    // T-feature: an early-warning Radar once the base hits Level 3 (reveals approaching enemies).
+    if (!has("radar") && baseLvl >= 3 && p.gold >= 1 && p.iron >= 20 && p.silver >= 50) { this.build("radar"); return; }
     if (this.owned("guard_tower").length < 3 && has("war_factory") && p.iron >= 8 && p.silver >= 25) { this.build("guard_tower"); return; }
     // keep expanding economy when flush
     if (p.silver >= 60 && this.owned("silver_mine").length < 4) { this.build("silver_mine"); return; }
@@ -154,7 +156,8 @@ export class AIController {
     for (const b of barracks) {
       if (b.queue.length >= 2) continue;
       const r = Math.random();
-      let u: UnitId = r < 0.5 ? "infantry" : r < 0.8 ? "rocket_soldier" : "robot";
+      // mostly combat units, with an occasional Medic / Repair Engineer for sustain.
+      let u: UnitId = r < 0.45 ? "infantry" : r < 0.7 ? "rocket_soldier" : r < 0.85 ? "robot" : r < 0.93 ? "medic" : "repair_engineer";
       const ud = UNIT_DEFS[u];
       if (this.world.canAfford(p, ud.cost)) this.world.issue({ t: "train", building: b.id, unit: u });
     }

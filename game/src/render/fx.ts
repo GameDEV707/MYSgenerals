@@ -11,6 +11,8 @@ interface FloatText { x: number; y: number; text: string; color: string; age: nu
 interface Decal { x: number; y: number; age: number; life: number; size: number; }
 interface Tracer { x1: number; y1: number; x2: number; y2: number; age: number; color: string; }
 interface Ping { x: number; y: number; age: number; color: string; }
+// Heal/repair beam: a short-lived link from a support unit to the ally it is mending (spec §16).
+interface HealBeam { x1: number; y1: number; x2: number; y2: number; age: number; life: number; color: string; }
 // Cosmetic flying projectile (spec §20.4): spawned from a `fire` event, purely visual — the
 // host has already resolved damage, so these can never desync gameplay.
 interface CosProj { kind: string; x: number; y: number; fromX: number; fromY: number; toX: number; toY: number; t: number; total: number; rot: number; arc: boolean; owner: number; }
@@ -33,6 +35,7 @@ export class FxRenderer {
   decals: Decal[] = [];
   tracers: Tracer[] = [];
   pings: Ping[] = [];
+  healBeams: HealBeam[] = [];
   projectiles: CosProj[] = [];
   cmdMarkers: CmdMarker[] = [];
   shake = 0;
@@ -72,6 +75,17 @@ export class FxRenderer {
         break;
       }
       case "impact": this.explode(ev.pos, ev.kind, ev.size); break;
+      case "heal": {
+        const color = ev.kind === "repair" ? "#7ad7ff" : "#34d399";
+        this.healBeams.push({ x1: ev.from.x, y1: ev.from.y, x2: ev.to.x, y2: ev.to.y, age: 0, life: 0.3, color });
+        // a few rising sparkles at the patient
+        for (let i = 0; i < 4; i++) {
+          const a = Math.random() * Math.PI * 2, sp = Math.random() * 0.5;
+          this.particles.push({ x: ev.to.x + (Math.random() - 0.5) * 0.6, y: ev.to.y, vx: Math.cos(a) * sp * 0.4, vy: -0.6 - Math.random() * 0.5, age: 0, life: 0.5, size: 1.5 + Math.random() * 1.5, color, grav: -0.4 });
+        }
+        if (this.healBeams.length > 60) this.healBeams.shift();
+        break;
+      }
       case "death": this.death(ev.pos, ev.kind, teamColor(ev.owner)); break;
       case "float": this.texts.push({ x: ev.pos.x, y: ev.pos.y, text: ev.text, color: ev.color, age: 0 }); break;
       case "construct": this.burst(ev.pos, 10, "#c9a87a", 0.6); break;
@@ -153,6 +167,8 @@ export class FxRenderer {
     this.decals = this.decals.filter((d) => d.age < d.life);
     for (const pg of this.pings) pg.age += dt;
     this.pings = this.pings.filter((pg) => pg.age < 1.2);
+    for (const hb of this.healBeams) hb.age += dt;
+    this.healBeams = this.healBeams.filter((hb) => hb.age < hb.life);
     for (const cm of this.cmdMarkers) cm.age += dt;
     this.cmdMarkers = this.cmdMarkers.filter((cm) => cm.age < 0.6);
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 20);
@@ -250,6 +266,16 @@ export class FxRenderer {
       const k = pg.age / 1.2; const r = z * (0.5 + k * 2);
       ctx.globalAlpha = 1 - k; ctx.strokeStyle = pg.color; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(toX(pg.x), toY(pg.y), r, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // heal / repair beams (support units) — a glowing link + a pulse ring at the patient
+    for (const hb of this.healBeams) {
+      const k = hb.age / hb.life;
+      ctx.globalAlpha = (1 - k) * 0.85;
+      ctx.strokeStyle = hb.color; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(toX(hb.x1), toY(hb.y1)); ctx.lineTo(toX(hb.x2), toY(hb.y2)); ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(toX(hb.x2), toY(hb.y2), z * (0.3 + k * 0.4), 0, Math.PI * 2); ctx.stroke();
     }
     ctx.globalAlpha = 1;
     // floating text

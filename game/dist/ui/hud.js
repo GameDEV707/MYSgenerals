@@ -1,5 +1,5 @@
 import { BUILDING_DEFS, UNIT_DEFS, BUILD_MENU, RESEARCH_DEFS, RESEARCH_BY_ID, MINE_EMBLEM_COLORS, RESOURCE_COLORS } from "../data.js";
-import { MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, powerStatus, MAX_BASE_LEVEL, MAX_DEFENSE_LEVEL, REQUIRED_BASE_LEVEL, DEFENSE_RANGE_PER_LEVEL, DEFENSE_DAMAGE_PER_LEVEL, defenseUpgradeCost, CC_UPGRADE_COSTS } from "../constants.js";
+import { MAX_BAYS, MAX_SPEED_LEVEL, ASSEMBLY_SPEED_PER_LEVEL, BAY_UPGRADE_COSTS, SPEED_UPGRADE_COSTS, powerStatus, MAX_BASE_LEVEL, MAX_DEFENSE_LEVEL, MAX_RADAR_LEVEL, REQUIRED_BASE_LEVEL, DEFENSE_RANGE_PER_LEVEL, DEFENSE_DAMAGE_PER_LEVEL, defenseUpgradeCost, CC_UPGRADE_COSTS } from "../constants.js";
 import { t, onLangChange } from "../i18n.js";
 import { loadHudLayout, saveHudLayout, clearHudLayout } from "./hudLayout.js";
 import { getKeyBindings, keyLabel } from "./keyBindings.js";
@@ -211,7 +211,7 @@ export class HUD {
         let sig = own.map((e) => e.id + e.type + ":" + e.level + (e.upgrading ? "U" + e.upgrading.to : "")).join(",")
             + "|" + this.tab + "|" + kb + (builder ? "b" : "") + "|F" + this.catFocus + "|BL" + this.baseLevel();
         if (prod)
-            sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".");
+            sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".") + ":R" + (prod.rally ? Math.floor(prod.rally.x) + "," + Math.floor(prod.rally.y) : "-");
         if (research) {
             const r = this.me().research;
             sig += "|R" + research.id + ":" + (research.researching ? "act" + research.researching.id : "idle") + ":" + r.weapons + r.armor + r.factoryTech + (r.logistics ? 1 : 0);
@@ -309,6 +309,9 @@ export class HUD {
             // T30 Part B: a defensive tower gets an upgrade button + a range/damage/level readout.
             if (def0.weapon && !def0.produces && !def0.isWall)
                 return this.defensePanelHtml(b0);
+            // Radar: a level-upgrade (reveal radius) panel.
+            if (b0.type === "radar")
+                return this.radarPanelHtml(b0);
             return `<h4>${t(def0.nameKey)}</h4>
         <div class="grid"><div class="cmd gridbtn" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div></div>`;
         }
@@ -343,10 +346,27 @@ export class HUD {
         const upBtns = this.upgradeBtns(prod);
         // T30 Part A: the Command Center also carries its level-upgrade button (unlocks the build tree).
         const lvlBtn = prod.type === "command_center" ? this.levelUpBtn(prod, MAX_BASE_LEVEL) : "";
+        // Flag (rally) button — arms flag placement; new units gather there, idle HQ workers idle there.
+        const flagBtn = this.flagBtn();
+        const rallyTxt = prod.rally ? `✓ (${Math.floor(prod.rally.x)}, ${Math.floor(prod.rally.y)})` : "—";
         return `<h4>${t(def.nameKey)} — ${t("cat.train")}${prod.type === "command_center" ? ` · ${t("hud.level", { n: prod.level })}` : ""}</h4>
-      <div class="grid">${trainBtns}${upBtns}${lvlBtn}</div>
-      <div class="qrow"><span class="dimtxt">${t("cmd.rally")}: ${prod.rally ? "✓" : "—"}</span></div>
+      <div class="grid">${trainBtns}${upBtns}${lvlBtn}${flagBtn}</div>
+      <div class="qrow"><span class="dimtxt">${t("cmd.rally")}: ${rallyTxt}</span></div>
       ${this.queueStripHtml(prod)}`;
+    }
+    // The Flag button: clicking it arms flag-placement (next map click sets the rally point).
+    flagBtn() {
+        return `<div class="cmd gridbtn" data-act="rally" title="${t("cmd.flagHint")}">
+      <span class="ic">🚩</span><span>${t("cmd.flag")}</span></div>`;
+    }
+    // The Radar panel: a level-upgrade button (reveal radius grows per level), a radius readout + Sell.
+    radarPanelHtml(b) {
+        return `<h4>${t("buildings.radar.name")} · ${t("hud.level", { n: b.level })}</h4>
+      <div class="defstats">${t("hud.radarRange", { n: b.vision })}</div>
+      <div class="grid">
+        ${this.levelUpBtn(b, MAX_RADAR_LEVEL)}
+        <div class="cmd gridbtn" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div>
+      </div>`;
     }
     // T30 Part B: the defensive-tower panel — a level-upgrade button (range + damage grow per level),
     // a live range/damage/level readout, and Sell.
@@ -533,6 +553,11 @@ export class HUD {
             this.audio.play("click");
             return;
         }
+        if (act === "rally") {
+            this.input.pendingRally = true;
+            this.audio.play("click");
+            return;
+        }
         if (act === "mineassign") {
             const mineId = parseInt(el.dataset.mine || "0", 10);
             const miners = this.selectedEntities().filter((e) => e.owner === me && e.type === "miner").map((e) => e.id);
@@ -608,7 +633,7 @@ export class HUD {
             if (e.owner !== this.world.me || e.kind !== "building")
                 return false;
             const def = BUILDING_DEFS[e.type];
-            return e.type === "command_center" || (!!def.weapon && !def.produces && !def.isWall);
+            return e.type === "command_center" || e.type === "radar" || (!!def.weapon && !def.produces && !def.isWall);
         });
     }
     // T26 Part E: a digit key activates the Nth grid action button (in visible order).

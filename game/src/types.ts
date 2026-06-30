@@ -13,6 +13,7 @@ export type EntityKind = "unit" | "building" | "neutral";
 // ---- Unit type ids (spec §8) ----
 export type UnitId =
   | "miner" | "engineer"
+  | "repair_engineer" | "medic"
   | "infantry" | "rocket_soldier" | "robot"
   | "light_tank" | "heavy_tank" | "artillery" | "rocket_launcher" | "anti_air"
   | "hero";
@@ -21,7 +22,7 @@ export type UnitId =
 export type BuildingId =
   | "command_center" | "silver_mine" | "iron_mine" | "gold_mine" | "power_plant"
   | "barracks" | "war_factory" | "research_center"
-  | "guard_tower" | "cannon_tower" | "rocket_tower" | "wall";
+  | "guard_tower" | "cannon_tower" | "rocket_tower" | "radar" | "wall";
 
 // ---- Neutral ids (spec §12; T32 adds the capturable garrisoned outpost / sub-base) ----
 export type NeutralId = "oil_derrick" | "outpost";
@@ -44,6 +45,16 @@ export interface Weapon {
 
 export type ProjectileKind = "tracer" | "shell" | "rocket" | "artillery" | "energy" | "flame" | "beam" | "flak";
 
+// A support unit's auto-heal/repair ability. The unit seeks the nearest friendly damaged target it
+// can service within `range` tiles, walks to it, and restores `rate` HP per second while in range.
+// `targets` picks WHAT it can service: "mechanical" → tanks/robots + defensive towers (the Repair
+// Engineer), "infantry" → foot soldiers (the Medic).
+export interface HealAbility {
+  rate: number;                          // HP restored per second
+  range: number;                         // search / heal radius in tiles
+  targets: "mechanical" | "infantry";
+}
+
 export interface UnitDef {
   id: UnitId;
   nameKey: string;
@@ -57,6 +68,7 @@ export interface UnitDef {
   weapon?: Weapon;
   isWorker?: boolean;
   isVehicle?: boolean;
+  heal?: HealAbility; // support units (Repair Engineer / Medic) — auto-repair/heal allies
   radius: number; // collision radius in tiles
   icon: string;
 }

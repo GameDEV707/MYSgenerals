@@ -66,11 +66,18 @@ export const CC_UPGRADE_COSTS = [
 // Timed upgrade durations (seconds), same indexing. These are explicit (the CC has no buildTime).
 export const CC_UPGRADE_TIMES = [20, 30];
 // Minimum Command-Center level required to BUILD each building (default 1 when absent). Barracks +
-// Cannon Tower need L2; War Factory + Rocket Tower need L3. Everything else is available at L1.
+// Cannon Tower need L2; War Factory + Rocket Tower need L3. The Radar (early-warning building) also
+// needs L3. Everything else is available at L1.
 export const REQUIRED_BASE_LEVEL = {
     barracks: 2, cannon_tower: 2,
-    war_factory: 3, rocket_tower: 3,
+    war_factory: 3, rocket_tower: 3, radar: 3,
 };
+// ---- Radar: auto-rotating early-warning building (revealable enemy detection). It has no weapon —
+// its power is a LARGE vision radius that grows per upgrade level, so it spots enemies far out and
+// shows them on the map/minimap. Upgrades to 3 levels (same cost/time rule as defensive towers). ----
+export const MAX_RADAR_LEVEL = 3;
+// Vision radius (tiles) per radar level (index 0 = L1). Bigger than any tower so it scouts ahead.
+export const RADAR_VISION = [14, 19, 24];
 // ---- T30: upgradeable defenses (spec §24 → T30 Part B) ----
 export const MAX_DEFENSE_LEVEL = 3; // towers upgrade 1 → 2 → 3
 export const DEFENSE_RANGE_PER_LEVEL = 1; // +1 tile range per level above 1

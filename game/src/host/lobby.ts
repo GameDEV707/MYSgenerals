@@ -4,7 +4,7 @@
 import { getMap } from "../sim/map.js";
 import { LobbyState, LobbySlot, SlotKind, GameType } from "../net/protocol.js";
 
-export const PALETTE = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc"];
+export const PALETTE = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6", "#a3e635"];
 // Default side colours for custom-team mode: [0] = blue side, [1] = red side. Editable in the lobby.
 export const TEAM_COLORS: [string, string] = ["#4ea3ff", "#ff5a4d"];
 
@@ -22,7 +22,7 @@ export class Lobby {
   // host-side per-slot metadata (not all serialized to clients)
   local: boolean[] = []; // slot is a local player on the host machine (loopback)
 
-  constructor(hostUrl: string, map = "twin_rivers", roomCode = randomRoomCode()) {
+  constructor(hostUrl: string, map = "twin_spear", roomCode = randomRoomCode()) {
     const max = this.maxFor(map);
     const slots: LobbySlot[] = [];
     for (let i = 0; i < max; i++) {

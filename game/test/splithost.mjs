@@ -16,7 +16,7 @@ const sink = {
 };
 const last = (peerId, m) => { const a = (log.get(peerId) ?? []).filter((x) => x.m === m); return a[a.length - 1]; };
 
-const host = new GameHost(sink, { hostUrl: "", map: "twin_rivers", roomCode: "SPLT" });
+const host = new GameHost(sink, { hostUrl: "", map: "twin_spear", roomCode: "SPLT" });
 
 console.log("Two LOCAL players on one device (online split-screen mechanism):");
 // Player A — the host's own browser (loopback → claims slot 0).

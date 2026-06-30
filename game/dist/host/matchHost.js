@@ -292,6 +292,8 @@ export class MatchHost {
             fl |= FL.weapon;
         if (e.hero)
             fl |= FL.hero;
+        if (e.hostileNeutral)
+            fl |= FL.hostile; // T34: fortress keep + garrison → white, two-way targetable
         const k = e.kind === "building" ? "b" : e.kind === "neutral" ? "n" : "u";
         const s = {
             id: e.id, k, t: e.type, o: e.owner,

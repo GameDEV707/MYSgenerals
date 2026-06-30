@@ -6,8 +6,8 @@ let failures = 0;
 function assert(c, m) { if (!c) { console.error("  ✗ " + m); failures++; } else console.log("  ✓ " + m); }
 
 console.log("Lobby slots & start gating (§18.3):");
-const lob = new Lobby("http://192.168.1.5:3000", "twin_rivers", "ABCD");
-assert(lob.state.slots.length === 2, "twin_rivers → 2 slots");
+const lob = new Lobby("http://192.168.1.5:3000", "twin_spear", "ABCD");
+assert(lob.state.slots.length === 2, "twin_spear → 2 slots");
 assert(lob.state.slots[0].kind === "human", "slot 0 is the host (human)");
 assert(lob.state.slots[1].kind === "open", "slot 1 starts open");
 assert(lob.canStart() === false, "cannot start with only the host (needs 2 participants)");
@@ -24,8 +24,8 @@ lob.setColor(1, hostColor); // try to clash with host's color
 assert(lob.state.slots[1].color !== hostColor, "cannot set a slot to a color already in use");
 
 console.log("Split-screen toggle (§18.3 / §21):");
-const l2 = new Lobby("http://192.168.1.5:3000", "crossfire");
-assert(l2.state.slots.length === 4, "crossfire → 4 slots");
+const l2 = new Lobby("http://192.168.1.5:3000", "quad_foundry");
+assert(l2.state.slots.length === 4, "quad_foundry → 4 slots");
 l2.setSplit(true);
 assert(l2.state.splitScreen === true, "split-screen enabled");
 const locals = l2.localPlayerIds();

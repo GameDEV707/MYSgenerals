@@ -100,7 +100,7 @@ export class Menu {
   }
 
   // ---------- Single Player (vs AI) ----------
-  private spCfg = { map: "twin_rivers", difficulty: "normal" as Difficulty, color: PALETTE[0], aiCount: 1 };
+  private spCfg = { map: "twin_spear", difficulty: "normal" as Difficulty, color: PALETTE[0], aiCount: 1 };
   private showSetup(): void {
     this.root.innerHTML = "";
     const maxAI = getMap(this.spCfg.map).spawns.length - 1;
@@ -206,8 +206,12 @@ export class Menu {
       ctx.fillRect(Math.floor(x * sx), Math.floor(y * sy), Math.ceil(sx), Math.ceil(sy));
     }
     ctx.fillStyle = "#cdd6df";
-    for (const n of m.neutrals) { ctx.beginPath(); ctx.arc(n.x * sx, n.y * sy, 2, 0, Math.PI * 2); ctx.fill(); }
-    const spawnColors = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc"];
+    for (const n of m.neutrals) {
+      // T34: fortress markers render white; outpost/derrick stay grey.
+      ctx.fillStyle = n.kind === "fortress" ? "#eef2f6" : "#9aa4ad";
+      ctx.beginPath(); ctx.arc(n.x * sx, n.y * sy, n.kind === "fortress" ? 3 : 2, 0, Math.PI * 2); ctx.fill();
+    }
+    const spawnColors = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6", "#a3e635"];
     m.spawns.forEach((s, i) => {
       ctx.fillStyle = spawnColors[i % spawnColors.length];
       ctx.beginPath(); ctx.arc(s.x * sx, s.y * sy, 4, 0, Math.PI * 2); ctx.fill();
@@ -219,7 +223,7 @@ export class Menu {
   // This path runs an in-page MatchHost over LoopbackTransport. A browser cannot run a WebSocket
   // server, so it can NEVER accept remote devices — for that the user runs the real Node host
   // (host.bat / host.sh / host.command). Hence no join URL/QR is shown here (spec §24 T25 #2/#3).
-  private showLobby(map = "twin_rivers"): void {
+  private showLobby(map = "twin_spear"): void {
     this.lobby = new Lobby("", map);
     this.lobby.onChange = () => this.renderLobby();
     this.renderLobby();

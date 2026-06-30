@@ -24,8 +24,10 @@ export type BuildingId =
   | "barracks" | "war_factory" | "research_center"
   | "guard_tower" | "cannon_tower" | "rocket_tower" | "radar" | "wall";
 
-// ---- Neutral ids (spec §12; T32 adds the capturable garrisoned outpost / sub-base) ----
-export type NeutralId = "oil_derrick" | "outpost";
+// ---- Neutral ids (spec §12; T32 adds the capturable garrisoned outpost / sub-base; T34 adds the
+// capturable Neutral FORTRESS — a white, hostile keep with a fixed garrison, taken by shooting it
+// down from range rather than by presence) ----
+export type NeutralId = "oil_derrick" | "outpost" | "fortress";
 
 export interface Weapon {
   damage: number;

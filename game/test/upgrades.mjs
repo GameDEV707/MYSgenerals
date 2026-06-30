@@ -18,7 +18,7 @@ function mkPlayer(id) {
     research: { weapons: 0, armor: 0, factoryTech: 0, logistics: false }, unitsBuilt: 0, unitsLost: 0, buildingsDestroyed: 0 };
 }
 function freshWorld() {
-  const map = getMap("twin_rivers");
+  const map = getMap("twin_spear");
   const w = new World(map);
   w.addPlayer(mkPlayer(0));
   w.addPlayer(mkPlayer(1));

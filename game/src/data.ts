@@ -164,7 +164,7 @@ export const BUILDING_DEFS: Record<BuildingId, BuildingDef> = {
   },
 };
 
-export const NEUTRAL_VISION: Record<NeutralId, number> = { oil_derrick: 5, outpost: 8 };
+export const NEUTRAL_VISION: Record<NeutralId, number> = { oil_derrick: 5, outpost: 8, fortress: 10 };
 
 // ---- T32: neutral structure definitions (spec §24 → T32 Part B). The oil derrick is a pure income
 // point; the OUTPOST is a garrisoned defensive tower (a fixed-strength gun — no veterancy / no level
@@ -180,6 +180,18 @@ export const NEUTRAL_DEFS: Record<NeutralId, NeutralDef> = {
   outpost: {
     hp: 1600, vision: 8, radius: 1.3, footprint: 3, nameKey: "buildings.outpost.name", icon: "🏯",
     weapon: { damage: 20, damageType: "Bullet", range: 7, cooldown: 0.7, projectile: "tracer", projectileSpeed: 0, targetsGround: true, targetsAir: true, preferred: "InfantryLight" },
+  },
+  // T34: the capturable Neutral FORTRESS — a powerful, unowned (white) keep with its own FIXED
+  // garrison (anti-air "zenit" tanks + gun towers). Unlike the derrick/outpost it is HOSTILE (fires
+  // on any non-owner unit) and VULNERABLE: you take it by shooting it down from range. At 0 HP it is
+  // not destroyed — it FLIPS to the attacker (keep + surviving garrison) and becomes a forward
+  // sub-base. HP is "normal" (between a War Factory and a Command Center): killable by a committed
+  // army, not by one unit. `spawn()` reads this table; the garrison composition lives in constants.ts.
+  fortress: {
+    hp: 2600, vision: 10, radius: 1.8, footprint: 4, nameKey: "buildings.fortress.name", icon: "♛",
+    weapon: { damage: 70, damageType: "Cannon", range: 9, cooldown: 1.6,
+              projectile: "shell", projectileSpeed: 12, splash: 1.0,
+              targetsGround: true, targetsAir: true, preferred: "VehicleHeavy" },
   },
 };
 

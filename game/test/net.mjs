@@ -111,7 +111,7 @@ function wsConnect(port) {
 
 // --- Minimal in-process host server for the test ---
 const PORT = 19877;
-const lobby = new Lobby(`http://127.0.0.1:${PORT}`, "twin_rivers", "TEST");
+const lobby = new Lobby(`http://127.0.0.1:${PORT}`, "twin_spear", "TEST");
 
 const clientSessions = new Map();
 let matchHost = null;

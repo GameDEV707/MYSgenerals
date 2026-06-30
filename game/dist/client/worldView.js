@@ -1,6 +1,8 @@
 import { BUILDING_DEFS } from "../data.js";
 import { FL, INTERP_DELAY_MS } from "../net/protocol.js";
 export const NEUTRAL = -1;
+// T34: the Neutral Fortress faction renders near-white (reads on the grey UI); derrick/outpost stay grey.
+export const NEUTRAL_FORTRESS_COLOR = "#eef2f6";
 export class ViewEntity {
     constructor(id) {
         this.kind = "unit";
@@ -18,6 +20,7 @@ export class ViewEntity {
         this.mining = false;
         this.isVehicle = false;
         this.hasWeapon = false;
+        this.hostileNeutral = false; // T34: a fortress keep / garrison entity (rendered white, two-way targetable)
         this.busy = false; // T34: own builder engineer is constructing / own support unit is healing
         this.hero = null;
         this.stub = false; // last-known building (drawn dimmed)
@@ -219,6 +222,7 @@ export class WorldView {
         ve.mining = (es.fl & FL.mining) !== 0;
         ve.isVehicle = (es.fl & FL.vehicle) !== 0;
         ve.hasWeapon = (es.fl & FL.weapon) !== 0;
+        ve.hostileNeutral = (es.fl & FL.hostile) !== 0;
         ve.busy = (es.fl & FL.busy) !== 0;
         ve.stub = (es.fl & FL.stub) !== 0;
         ve.buildProgress = es.bp ?? (ve.constructing ? 0 : 1);
@@ -282,10 +286,10 @@ export class WorldView {
         }
         let nearOwn = false;
         for (const e of this.entities) {
-            // T32: buildings AND owned outposts (forward sub-bases) block tiles + anchor construction.
+            // T32/T34: buildings AND owned outposts / fortresses (forward sub-bases) block tiles + anchor construction.
             const isBuilding = e.kind === "building";
-            const isOutpost = e.type === "outpost";
-            if (!isBuilding && !isOutpost)
+            const isAnchor = e.type === "outpost" || e.type === "fortress";
+            if (!isBuilding && !isAnchor)
                 continue;
             const fp = BUILDING_DEFS[e.type]?.footprint ?? 3;
             const half = Math.floor(fp / 2);
@@ -296,7 +300,7 @@ export class WorldView {
                     if (tx >= 0 && ty >= 0 && tx < m.w && ty < m.h)
                         this.blocked[ty * m.w + tx] = 1;
                 }
-            if (this.isAlly(e.owner) && (isBuilding || isOutpost) && Math.hypot(e.pos.x - (x + 0.5), e.pos.y - (y + 0.5)) <= 8 + e.radius)
+            if (this.isAlly(e.owner) && (isBuilding || isAnchor) && Math.hypot(e.pos.x - (x + 0.5), e.pos.y - (y + 0.5)) <= 8 + e.radius)
                 nearOwn = true;
         }
         const fp = BUILDING_DEFS[building].footprint, half = Math.floor(fp / 2);
@@ -324,5 +328,12 @@ export class WorldView {
         if (owner === NEUTRAL)
             return "#9aa4ad";
         return this.players[owner]?.color ?? "#888";
+    }
+    // T34: entity-aware colour. A hostile NEUTRAL fortress / garrison is white; other neutrals
+    // (derrick/outpost) stay grey; a captured fortress (owner flipped) takes the capturer's colour.
+    entityColor(e) {
+        if (e.owner === NEUTRAL && e.hostileNeutral)
+            return NEUTRAL_FORTRESS_COLOR;
+        return this.playerColor(e.owner);
     }
 }

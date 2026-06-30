@@ -913,6 +913,10 @@ Regions:
 
 ## 19. Maps (Full Specs)
 
+> **T34 update:** §19.1–§19.4 below describe the original maps and are **superseded** — the shipped
+> set is now the **seven** maps in **§19.6** (the three original maps were retired). The original
+> sections are kept for history.
+
 Maps are authored in **Tiled** (tile grid + object layers for spawns, deposits, neutral points, decorations) and exported as JSON. Each map defines: dimensions (tiles), terrain (passable/impassable/water/road), player **start positions** (each with a pre-placed Command Center + adjacent Silver Mine), resource **deposits** (silver/iron/gold), **neutral points**, **choke points**, and theme/aesthetic. All map names/descriptions are localized.
 
 Common terrain types: `grass`, `dirt/road` (faster), `sand`, `rock/cliff` (impassable), `water` (impassable to ground, passable to air, artillery arcs over), `bridge` (crossable water), `forest` (blocks vision/slows infantry, blocks vehicles) `[OPT]`.
@@ -959,6 +963,31 @@ Common terrain types: `grass`, `dirt/road` (faster), `sand`, `rock/cliff` (impas
 - Spawns auto-assign by player count; unused spawns become neutral/AI or are sealed.
 - Pathfinding grid, vision blockers, and water/bridge rules derive from the Tiled layers automatically.
 - A map JSON schema is validated on load (Task T14) so a malformed map fails loudly, not silently.
+
+### 19.6 The shipped maps (T34 — seven new large/fast arenas)
+
+The procedurally-generated map set (`src/sim/map.ts`). All are bigger and faster than the originals
+(wide road lanes for early contact, resources close enough to ramp quickly), keep rotational fairness,
+and guarantee every base can build BOTH a gold and an iron mine inside its walls. Player count derives
+from `spawns.length`. The large maps carry the new **Neutral Fortress** faction (§24 → T34); the
+smaller 2P/4P maps carry a single central fortress as the tempo prize.
+
+| id | name | players | size | gimmick | fortresses |
+|---|---|---|---|---|---|
+| `twin_spear` | Twin Spear | 2 | 104×64 | fast triple-lane duel, central fortress over the gold | 1 |
+| `quad_foundry` | Quad Foundry | 4 | 112×112 | four corners, road cross, central cliff plateau | 1 |
+| `serpent_delta` | Serpent Delta | 4 | 116×100 | river delta, bridges, island fortress | 1 |
+| `hex_bazaar` | Hex Bazaar | 6 | 132×116 | six bases ring a gated walled market | 3 |
+| `iron_octagon` | Iron Octagon | 8 | 148×148 | rim ring-road + spokes, central vault | 3 |
+| `necrokeep_line` | Necrokeep Line | 2 teams (≤3v3) / 6 FFA | 168×88 | elongated two-lane map, boss-fortresses down the jungle spine | 3 |
+| `ashfall_crucible` | Ashfall Crucible | 3 | 116×116 | volcanic caldera, lava moat, three land bridges | 3 |
+
+- **Fortified bases.** Every spawn is walled with a centre-facing gate (`fortifyBase`) and seeded with
+  an interior iron + gold deposit (`baseDeposits`) — proven buildable + reachable by `test/maps.mjs`.
+- **The contested heart.** Every map's centre 3×3 is passable grass; rivers/lava-moats/cliff-rings/
+  walls surround it with bridges/ramps/gates, never seal it.
+- **`necrokeep_line` team layout.** `spawns[0]` = BLUE shared base (far left), `spawns[1]` = RED shared
+  base (far right) — the order team mode relies on; `spawns[2..5]` are the FFA-fill end-corner bases.
 
 ---
 
@@ -2265,6 +2294,56 @@ addition), so SP / split-screen (T24) / LAN (T25) regress cleanly. Verifiable he
 signaling-codec, name-edit and mode-toggle suites pass and `bash build.sh` is clean; the live WebRTC
 internet connection is verified by the design owner on real devices (STUN-only; TURN/strict-NAT fallback
 deferred and documented).
+
+---
+
+### T34 — Seven new large/fast maps + a capturable Neutral FORTRESS faction  *(map overhaul + new neutral mechanic)*
+
+> Source of truth: `MYSgenerals.md` §24 → T34. The three previously-shipped maps (§19.1–§19.4, now
+> superseded, see §19.6) are retired and replaced by **seven** brand-new, bigger, FASTER arenas tuned
+> for specific player counts (2 / 3 / 4 / 6 / 8) plus a dedicated 2-team elongated lane map. The large
+> maps add a brand-new **Neutral Fortress** mechanic. **Extends the authoritative simulation** (§3.2):
+> the fortress is the first *hostile, targetable, capturable-by-defeat* neutral; everything else
+> (economy, combat, capture-by-presence for derrick/outpost, fog, win/lose) is unchanged.
+
+**Goal.** Replace the retired maps with seven creative arenas, each with valid fortified bases (every
+base can build BOTH a gold and an iron mine), wide road lanes for fast contact, contested deposits,
+capturable outposts and oil derricks; and add three powerful **white** neutral fortress-lords to each
+large map — each defended by its own FIXED garrison (anti-air "zenit" tanks + tanks + gun towers),
+captured by shooting it down from range (at 0 HP it flips to the attacker with its surviving army).
+
+### Scope checklist (T34)
+
+- **A — The 7 maps** (`sim/map.ts` rewrite): `twin_spear` (2P, 104×64), `quad_foundry` (4P, 112×112),
+  `serpent_delta` (4P, 116×100), `hex_bazaar` (6P, 132×116), `iron_octagon` (8P, 148×148),
+  `necrokeep_line` (2-team / 6-FFA, 168×88), `ashfall_crucible` (3P, 116×116). New helpers `laneRoad`
+  (road bands), `wallArc` (gated wall/cliff rings) and `clearObjects` (guarantees the centre + every
+  objective sit on reachable grass). `MAP_IDS` + `getMap` updated; id-based name keys `menu.map.<id>`.
+- **B — Neutral Fortress faction** (`types.ts` / `data.ts` / `constants.ts` / `world.ts` /
+  `protocol.ts` / `matchHost.ts` / renderer): new `fortress` neutral id + def + weapon, the
+  `FORTRESS_GARRISON` composition + `FORTRESS_CAPTURE_BOUNTY`. The keep is a HOSTILE neutral
+  (`hostileNeutral`, two-way targetable via the single `isEnemy` change), spawns its fixed garrison on
+  a ring with a hold-leash, takes direct + splash damage, and on defeat is CAPTURED (flips keep +
+  surviving garrison to the attacker, banks the bounty, becomes a forward build anchor) instead of
+  dying. Derrick/outpost capture-by-presence is untouched.
+- **C — Supporting**: `PALETTE` grown to 8 distinct colours (8-player map gives everyone a colour),
+  menu map cards/thumbnails (fortress markers white), lobby blurbs + map names in en/ru/uz, default
+  map `twin_spear`, fortress name/desc i18n in en/ru/uz (Uzbek `ʻ`/`ʼ`).
+- **D — Tests**: `test/maps.mjs` rewritten (7 maps; centre-grass, gate reachability, deposit/neutral
+  on-grass + reachability, **gold+iron buildability per base**, fortress counts: 3 on each large map,
+  1 on each 2P/4P map). New `test/fortress.mjs` (garrison composition incl. AA + gun towers, two-way
+  hostility while derrick/outpost stay non-targetable, capture-by-defeat flips keep + survivors + banks
+  bounty, a garrison unit still dies, captured keep is a build anchor).
+
+### Definition of done (T34) — met
+
+- `sim/map.ts` ships exactly 7 maps; the retired 3 ids appear nowhere in `src/`/`test/`. Player counts
+  derive from `spawns.length` (2/4/4/6/8/6/3). `necrokeep_line` `spawns[0]`/`[1]` are the opposing
+  team bases (team mode green). Every base can build a gold AND an iron mine (proven by `maps.mjs`).
+- Three fortresses on each large map, one on each smaller map; each spawns its fixed garrison; the keep
+  + garrison render white; captured ones render in the capturer's colour; capture-by-defeat works.
+- `bash build.sh` clean, `tsc --noEmit` clean (no `any` in new code), all `game/test/*.mjs` pass
+  (35 suites incl. the new `fortress.mjs` and rewritten `maps.mjs`).
 
 ---
 

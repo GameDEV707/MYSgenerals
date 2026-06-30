@@ -14,6 +14,18 @@ export const DERRICK_CAPTURE_TIME = 6; // seconds of single-owner presence to fl
 export const OUTPOST_CAPTURE_TIME = 12; // seconds of single-owner presence to flip an outpost
 export const OUTPOST_CAPTURE_RADIUS = 3.2; // presence radius around an outpost
 export const OUTPOST_CAPTURE_BOUNTY = 25; // small silver reward on first capture of an outpost
+// ---- T34: Neutral FORTRESS faction (spec §24 → T34 Part B) ----
+// Each Fortress spawns this FIXED garrison once, on a ring around it, owned by NEUTRAL and rendered
+// white. It never respawns and never changes ("oʻzgarmas armiya"). The tanks include the requested
+// anti-air "zenit" units; the towers are the requested gun towers. On capture, every SURVIVING
+// garrison entity flips to the capturer (you inherit the lord's remaining army).
+export const FORTRESS_GARRISON = {
+    units: [{ id: "anti_air", n: 2 }, { id: "heavy_tank", n: 1 }, { id: "light_tank", n: 2 }], // AA "zenit" + tanks
+    towers: [{ id: "cannon_tower", n: 2 }, { id: "rocket_tower", n: 1 }], // gun towers
+    ring: 4.0, // how far from the keep the garrison is placed (tiles)
+    leash: 6.0, // garrison units hold within this radius of their keep (don't chase across the map)
+};
+export const FORTRESS_CAPTURE_BOUNTY = 120; // silver to the capturer when a fortress flips
 export const CC_POWER = 5; // Command Center base power (§6.2)
 export const POWER_PLANT_OUTPUT = 10; // §26.1
 // Brown-out penalties (§6.4)

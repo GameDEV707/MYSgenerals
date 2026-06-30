@@ -17,7 +17,7 @@ function mkPlayer(id) {
 // `withCCs` keeps both players alive (each owns a Command Center far from the central outpost) so the
 // sim keeps running; the "not a CC" block omits them on purpose.
 function fresh(withCCs = true) {
-  const map = getMap("iron_crossroads");
+  const map = getMap("quad_foundry");
   const w = new World(map);
   w.addPlayer(mkPlayer(0)); w.addPlayer(mkPlayer(1));
   w.setupNeutrals();

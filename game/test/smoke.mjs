@@ -33,7 +33,7 @@ function makePlayer(id, isAI, color) {
 }
 
 console.log("Economy (§6 / §26.1):");
-const map = getMap("twin_rivers");
+const map = getMap("twin_spear");
 const w = new World(map);
 w.addPlayer(makePlayer(0, false, "#4ea3ff"));
 w.addPlayer(makePlayer(1, true, "#ff5a4d"));

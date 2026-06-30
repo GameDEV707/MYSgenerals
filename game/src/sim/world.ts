@@ -15,7 +15,7 @@ import {
   MAX_BASE_LEVEL, CC_UPGRADE_COSTS, CC_UPGRADE_TIMES, REQUIRED_BASE_LEVEL, MAX_DEFENSE_LEVEL,
   DEFENSE_RANGE_PER_LEVEL, DEFENSE_DAMAGE_PER_LEVEL, defenseUpgradeCost, upgradeTime,
   mineSlotCap, isMineType, DERRICK_CAPTURE_TIME, OUTPOST_CAPTURE_TIME, OUTPOST_CAPTURE_RADIUS,
-  OUTPOST_CAPTURE_BOUNTY, MAX_RADAR_LEVEL, RADAR_VISION,
+  OUTPOST_CAPTURE_BOUNTY, MAX_RADAR_LEVEL, RADAR_VISION, FORTRESS_GARRISON, FORTRESS_CAPTURE_BOUNTY,
 } from "../constants.js";
 import { NavGrid, findPath, nearestFree } from "./grid.js";
 import { GameMap } from "./map.js";
@@ -96,6 +96,13 @@ export class Entity {
   weaponDef?: typeof UNIT_DEFS[UnitId]["weapon"];
   // neutral
   captureProgress = 0; captureOwner = NEUTRAL; bountyCd = 0;
+  // T34: Neutral FORTRESS faction. `hostileNeutral` marks a fortress keep / its garrison so it is
+  // two-way targetable (fires on, and is fired upon by, everyone). `fortressId` links a garrison
+  // entity to its keep (the keep's own fortressId is its own id). A garrison UNIT holds within
+  // `guardLeash` tiles of `guardPos` (its keep) so it defends rather than roams. The keep records
+  // its garrison ids in `garrison` so capture can flip the survivors.
+  hostileNeutral = false; fortressId: number | null = null;
+  guardPos: Vec2 | null = null; guardLeash = 0; garrison: number[] = [];
   // hero
   hero: HeroData | null = null;
   // visual flags
@@ -244,6 +251,8 @@ export class World {
       const nd = NEUTRAL_DEFS[type as keyof typeof NEUTRAL_DEFS] ?? NEUTRAL_DEFS.oil_derrick;
       e.maxHp = nd.hp; e.hp = nd.hp; e.vision = nd.vision; e.radius = nd.radius;
       e.owner = NEUTRAL; e.captureOwner = NEUTRAL; e.weaponDef = nd.weapon;
+      // T34: a fortress keep is a HOSTILE neutral (two-way targetable) and links to itself.
+      if (type === "fortress") { e.hostileNeutral = true; e.fortressId = e.id; }
       this.occupy(e, true);
     }
     this.entities.push(e); this.byId.set(e.id, e);
@@ -321,14 +330,50 @@ export class World {
   }
 
   setupNeutrals(): void {
-    for (const n of this.map.neutrals) this.spawn("neutral", n.kind, NEUTRAL, n.x, n.y);
+    for (const n of this.map.neutrals) {
+      const keep = this.spawn("neutral", n.kind, NEUTRAL, n.x, n.y);
+      if (n.kind === "fortress") this.spawnFortressGarrison(keep);
+    }
+  }
+
+  // T34: place a fortress keep's FIXED garrison on a ring around it. Units (AA "zenit" tanks + tanks)
+  // are spawned as hostile-neutral units held on a leash to their keep; towers (cannon/rocket) are
+  // spawned as hostile-neutral buildings. Every garrison entity is tagged with the keep's id so a
+  // capture can flip the survivors, and the keep records their ids in `garrison`.
+  private spawnFortressGarrison(keep: Entity): void {
+    const ring = FORTRESS_GARRISON.ring;
+    const slots: { id: string; isTower: boolean }[] = [];
+    for (const u of FORTRESS_GARRISON.units) for (let i = 0; i < u.n; i++) slots.push({ id: u.id, isTower: false });
+    for (const tw of FORTRESS_GARRISON.towers) for (let i = 0; i < tw.n; i++) slots.push({ id: tw.id, isTower: true });
+    const cx = Math.floor(keep.pos.x), cy = Math.floor(keep.pos.y);
+    slots.forEach((slot, i) => {
+      const ang = (i / slots.length) * Math.PI * 2;
+      // find a clear tile near the ring position (nudge outward if blocked)
+      let gx = cx, gy = cy;
+      for (let r = ring; r <= ring + 4; r += 1) {
+        const tx = Math.round(cx + Math.cos(ang) * r), ty = Math.round(cy + Math.sin(ang) * r);
+        if (this.grid.inBounds(tx, ty) && !this.grid.isBlocked(tx, ty)) { gx = tx; gy = ty; break; }
+      }
+      const g = this.spawn(slot.isTower ? "building" : "unit", slot.id, NEUTRAL, gx, gy);
+      g.owner = NEUTRAL; g.hostileNeutral = true; g.fortressId = keep.id;
+      if (!slot.isTower) {
+        // a garrison unit defends its keep: hold stance + a leash back to the keep.
+        g.stance = "hold";
+        g.guardPos = { x: keep.pos.x, y: keep.pos.y };
+        g.guardLeash = FORTRESS_GARRISON.leash;
+      }
+      keep.garrison.push(g.id);
+    });
   }
 
   // ---------- helpers ----------
   dist(a: Vec2, b: Vec2): number { return Math.hypot(a.x - b.x, a.y - b.y); }
   isEnemy(a: Entity, b: Entity): boolean {
     if (a.owner === b.owner) return false;
-    if (b.owner === NEUTRAL) return false;
+    // T34: a NEUTRAL entity is targetable only if it is a hostile fortress / its garrison (so the
+    // derrick & outpost stay non-targetable capture-by-presence points, exactly as before, while the
+    // fortress + garrison are enemies to everyone — players shoot it, it shoots back).
+    if (b.owner === NEUTRAL) return !!b.hostileNeutral;
     // Custom-team mode: players on the same side are allies, not enemies.
     const pa = this.players[a.owner], pb = this.players[b.owner];
     if (pa && pb && pa.team >= 0 && pa.team === pb.team) return false;
@@ -516,10 +561,10 @@ export class World {
       if (this.grid.terrain[this.grid.idx(tx, ty)] !== 0 && this.grid.terrain[this.grid.idx(tx, ty)] !== 3) return false;
       if (this.grid.isBlocked(tx, ty)) return false;
     }
-    // build radius (spec §7.3): within BUILD_RADIUS of a building / outpost owned by the side
-    // (custom-team co-op: any ally's building anchors construction — a captured outpost is a forward
-    // SUB-BASE, T32 Part B3). `sameTeam` is owner-only in classic, so this is unchanged there.
-    const near = this.entities.some((e) => this.sameTeam(e.owner, owner) && (e.kind === "building" || e.type === "outpost") && this.dist(e.pos, { x: x + 0.5, y: y + 0.5 }) <= BUILD_RADIUS + e.radius);
+    // build radius (spec §7.3): within BUILD_RADIUS of a building / outpost / fortress owned by the
+    // side (custom-team co-op: any ally's building anchors construction — a captured outpost/fortress
+    // is a forward SUB-BASE). `sameTeam` is owner-only in classic, so this is unchanged there.
+    const near = this.entities.some((e) => this.sameTeam(e.owner, owner) && (e.kind === "building" || e.type === "outpost" || e.type === "fortress") && this.dist(e.pos, { x: x + 0.5, y: y + 0.5 }) <= BUILD_RADIUS + e.radius);
     if (!near) return false;
     // iron/gold mines require a matching deposit nearby (spec §6.3)
     if (building === "iron_mine" || building === "gold_mine") {
@@ -588,7 +633,7 @@ export class World {
   // an owned outpost sub-base). This mirrors the `near` test in placementValid (i.e. exactly where
   // the player may place buildings). Support units stay inside it and only service allies inside it.
   insideBuildBoundary(owner: number, pos: Vec2): boolean {
-    return this.entities.some((e) => !e.dead && e.owner === owner && (e.kind === "building" || e.type === "outpost") && this.dist(e.pos, pos) <= BUILD_RADIUS + e.radius);
+    return this.entities.some((e) => !e.dead && e.owner === owner && (e.kind === "building" || e.type === "outpost" || e.type === "fortress") && this.dist(e.pos, pos) <= BUILD_RADIUS + e.radius);
   }
 
   // Where a strayed support unit retreats to to get back inside the boundary — the Command Center,
@@ -1249,6 +1294,12 @@ export class World {
       if (d > range) {
         // chase if a unit and allowed
         if (e.kind === "unit" && e.stance !== "hold") {
+          // T34: a leashed fortress-garrison unit never chases past its keep's leash — if the target
+          // is beyond the leash from its guard post, it returns to the post instead of roaming off.
+          if (e.guardPos && e.guardLeash > 0 && this.dist(e.guardPos, tgt.pos) > e.guardLeash) {
+            if (this.dist(e.pos, e.guardPos) > 1.5 && e.path.length === 0) this.setMove(e, e.guardPos.x, e.guardPos.y);
+            continue;
+          }
           e.repathTimer -= TICK_DT;
           if (e.repathTimer <= 0 || e.path.length === 0) { this.setMove(e, tgt.pos.x, tgt.pos.y); e.repathTimer = 0.5; }
         }
@@ -1382,7 +1433,9 @@ export class World {
       if (o.dead) continue;
       if (o.inMine) continue; // T30: miners inside a mine are shielded from splash
       if (o.owner === owner) continue;
-      if (o.owner === NEUTRAL && o.kind === "neutral") continue;
+      // T34: splash skips non-hostile neutrals (derrick/outpost) but DOES hit a hostile fortress
+      // keep + its garrison, so artillery helps a siege.
+      if (o.owner === NEUTRAL && o.kind === "neutral" && !o.hostileNeutral) continue;
       const d = this.dist(o.pos, pos);
       if (d <= radius + o.radius) {
         const falloff = Math.max(0.4, 1 - (d / (radius + 0.001)) * 0.6); // 100% center -> ~40% edge
@@ -1415,7 +1468,39 @@ export class World {
     if (dmg <= 0) return;
     tgt.hp -= dmg;
     tgt.hitFlash = 0.12;
-    if (tgt.hp <= 0) this.onKill(tgt, owner, attacker);
+    if (tgt.hp <= 0) {
+      // T34: a still-neutral fortress keep is CAPTURED (not destroyed) when shot down — it flips to
+      // the side that landed the finishing damage. Garrison units/towers (hostileNeutral but not the
+      // keep) die normally; a captured (player-owned) fortress is destroyed like any building.
+      if (tgt.kind === "neutral" && tgt.type === "fortress" && tgt.owner === NEUTRAL && tgt.hostileNeutral) {
+        this.captureFortress(tgt, owner);
+      } else {
+        this.onKill(tgt, owner, attacker);
+      }
+    }
+  }
+
+  // T34: capture-by-defeat. The keep is reset to full HP, becomes owned by the capturer (a powerful
+  // defensive building + a forward build anchor), every SURVIVING garrison entity flips to the
+  // capturer, the bounty is banked, and the events/toast fire. Owner -1 (no player landed the blow,
+  // e.g. a stray) leaves the keep neutral but at 0 HP — guard against that by ignoring the capture.
+  captureFortress(keep: Entity, capturer: number): void {
+    if (capturer < 0 || !this.players[capturer]) { keep.hp = 1; return; }
+    keep.owner = capturer; keep.hostileNeutral = false; keep.captureOwner = capturer;
+    keep.hp = keep.maxHp; keep.captureProgress = 0;
+    this.occupy(keep, true);
+    for (const id of keep.garrison) {
+      const g = this.byId.get(id);
+      if (!g || g.dead) continue;
+      g.owner = capturer; g.hostileNeutral = false;
+      g.target = null; g.guardPos = null; g.guardLeash = 0;
+      if (g.kind === "unit") g.stance = "aggressive";
+    }
+    const bk = this.bank(capturer);
+    if (bk) bk.silver += FORTRESS_CAPTURE_BOUNTY;
+    this.events.push({ e: "capture", pos: keep.pos, owner: capturer });
+    this.events.push({ e: "float", pos: keep.pos, text: "+" + FORTRESS_CAPTURE_BOUNTY, color: "#eef2f6" });
+    this.events.push({ e: "toast", key: "toast.captured", kind: "ok", params: { name: "buildings.fortress.name" }, to: capturer });
   }
 
   onKill(tgt: Entity, owner: number, attacker?: Entity): void {

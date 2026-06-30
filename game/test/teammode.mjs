@@ -17,7 +17,7 @@ function mkPlayer(id, team) {
 }
 
 console.log("Lobby custom-team mode:");
-const lob = new Lobby("", "crossfire", "TEAM"); // 4 slots
+const lob = new Lobby("", "quad_foundry", "TEAM"); // 4 slots
 lob.setGameType("team");
 assert(lob.state.gameType === "team", "game type switches to team");
 // fill: host (slot0) + 3 AIs → 2v2 needs two on each side
@@ -36,7 +36,7 @@ assert(blue.every((s) => s.color === blue[0].color) && red.every((s) => s.color 
 assert(blue[0].color !== red[0].color, "the two sides use distinct colours");
 
 console.log("Team spawning (shared base + one hero per player):");
-const map = getMap("crossfire");
+const map = getMap("quad_foundry");
 const w = new World(map);
 specs.forEach((s, i) => w.addPlayer(mkPlayer(i, s.team)));
 w.spawnAllBases("team");
@@ -69,7 +69,7 @@ assert(w.winner >= 0 && w.players[w.winner].team === 0, "the surviving side wins
 
 console.log("Shared vision + shared economy/control (the reported bug):");
 import { MatchHost } from "../dist/host/matchHost.js";
-const map2 = getMap("crossfire");
+const map2 = getMap("quad_foundry");
 const w2 = new World(map2);
 // team 0 = players 0 (leader, base) + 1 (hero-only teammate); team 1 = player 2 (enemy)
 [ [0,0], [1,0], [2,1] ].forEach(([id, tm]) => w2.addPlayer(mkPlayer(id, tm)));
@@ -131,7 +131,7 @@ assert(newPP && newPP.owner === 0, "the teammate's building is owned by / charge
 
 console.log("Teammate's captured income is BANKED to the shared balance (the reported superhero/oil bug):");
 // Fresh 2v2-style world: team 0 = players 0 (leader/base) + 1 (teammate), team 1 = player 2.
-const w3 = new World(getMap("crossfire"));
+const w3 = new World(getMap("quad_foundry"));
 [ [0, 0], [1, 0], [2, 1] ].forEach(([id, tm]) => w3.addPlayer(mkPlayer(id, tm)));
 w3.spawnAllBases("team");
 const leaderCC3 = w3.entities.find((e) => e.type === "command_center" && e.owner === 0);
@@ -159,7 +159,7 @@ assert(w3.players[0].silver > bankBeforeCap, "the capture BOUNTY is credited to 
 assert(w3.players[1].silver === mateBeforeCap, "the capture bounty did NOT go to the capturer's own purse");
 
 console.log("Shared research applies to a teammate's own units (custom-team economy is pooled):");
-const w4 = new World(getMap("crossfire"));
+const w4 = new World(getMap("quad_foundry"));
 [ [0, 0], [1, 0] ].forEach(([id, tm]) => w4.addPlayer(mkPlayer(id, tm)));
 w4.spawnAllBases("team");
 // The team's research lives on the bank (player 0). The damage path reads a unit owner's SIDE

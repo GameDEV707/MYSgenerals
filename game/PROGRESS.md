@@ -1567,3 +1567,49 @@ The live two-window WebRTC + split-screen leg remains **user-verified** (no `RTC
 internet in the sandbox). New strings `lobby.onlineSplit` / `lobby.onlineSplitHint` /
 `lobby.player2Name` added in en/ru/uz; `localeParity()` passes. No regression to single-player,
 split-screen (T24) or the LAN host (T25).
+
+
+
+### T34 — Seven new large/fast maps + a capturable Neutral FORTRESS faction
+
+The three originally-shipped maps are **retired** and replaced by **seven** brand-new, bigger, faster
+arenas, and the big maps gain a brand-new neutral mechanic: a powerful, unowned (**white**) **Fortress**
+with its own fixed garrison that you capture by **shooting it down from range** (not by walking up to
+it). Goal / Scope / DoD live in `MYSgenerals.md` §24 → T34 and §19.6.
+
+**Scope completed**
+
+- **A. The 7 maps (`src/sim/map.ts` rewrite).** `twin_spear` (2P, 104×64, triple-lane duel),
+  `quad_foundry` (4P, 112×112, four corners + cliff plateau), `serpent_delta` (4P, 116×100, river
+  delta + bridges + island fortress), `hex_bazaar` (6P, 132×116, gated walled market),
+  `iron_octagon` (8P, 148×148, rim ring-road + spokes + central vault),
+  `necrokeep_line` (2-team ≤3v3 / 6-FFA, 168×88, elongated two-lane with a boss-fortress jungle
+  spine — `spawns[0]`/`[1]` are the opposing team bases), `ashfall_crucible` (3P, 116×116, volcanic
+  caldera with a lava moat + land bridges). New helpers `laneRoad`, `wallArc`, `clearObjects`;
+  `MAP_IDS`/`getMap` updated; id-based name keys `menu.map.<id>`.
+- **B. Neutral Fortress faction.** New `fortress` neutral id (`types.ts`), def + weapon + vision
+  (`data.ts`), `FORTRESS_GARRISON` (2× anti-air "zenit", 1× heavy + 2× light tank, 2× cannon + 1×
+  rocket tower) and `FORTRESS_CAPTURE_BOUNTY` (`constants.ts`). In `world.ts`: `Entity.hostileNeutral`
+  / `fortressId` / `guardPos` / `guardLeash` / `garrison`; `spawn()` tags the keep; `setupNeutrals()`
+  rings the keep with its fixed garrison (held on a leash); the single `isEnemy` change
+  (`b.owner === NEUTRAL → return !!b.hostileNeutral`) makes only the fortress + garrison two-way
+  targetable (derrick/outpost unchanged); splash now hits hostile neutrals; `dealDamageRaw` intercepts
+  the keep's death and **captures** it (`captureFortress` flips keep + surviving garrison to the
+  attacker, resets HP, banks the bounty); the keep is a build anchor (`placementValid`). White
+  rendering: `FL.hostile` flag in the snapshot → `entityColor`/`drawFortress` in
+  `renderer.ts`/`worldView.ts`.
+- **C. Supporting.** `PALETTE` grown to 8 distinct colours; menu cards/thumbnails (fortress markers
+  white); default map `twin_spear`; fortress name/desc + 7 map names + 7 lobby blurbs in en/ru/uz
+  (Uzbek `ʻ`/`ʼ`).
+- **D. Tests.** `test/maps.mjs` rewritten for the 7 maps (centre-grass, gate reachability,
+  deposit/neutral on-grass + reachability, **per-base gold+iron buildability**, fortress counts: 3 on
+  each large map, 1 on each 2P/4P map). New `test/fortress.mjs` (garrison composition incl. AA + gun
+  towers; two-way hostility while derrick/outpost stay non-targetable; capture-by-defeat flips keep +
+  survivors + banks the bounty; a garrison unit still dies normally; captured keep is a build anchor).
+
+**Verified:** `bash build.sh` clean; `tsc --noEmit` clean for both `tsconfig.json` and
+`tsconfig.server.json` (no `any` in new code); **all 35** headless suites pass — including the rewritten
+`test/maps.mjs` and the new `test/fortress.mjs`, plus the unchanged regression suites (`teammode`,
+`outpost`, `placement`, `smoke`, `host`, `lobby`, `net`, …). The retired map ids appear nowhere in
+`src/`/`test/`. The live visuals (white keep + garrison, capture-to-your-colour) are rendered by the
+canvas renderer, which has no headless test harness (consistent with prior visual tasks).

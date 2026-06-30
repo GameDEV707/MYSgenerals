@@ -16,7 +16,7 @@ function mkPlayer(id, color) {
 }
 
 // 4-player game on Crossfire (largest map)
-const map = getMap("crossfire");
+const map = getMap("quad_foundry");
 const world = new World(map);
 world.addPlayer(mkPlayer(0, "#4ea3ff"));
 world.addPlayer(mkPlayer(1, "#ff5a4d"));

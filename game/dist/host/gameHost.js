@@ -48,7 +48,7 @@ export class GameHost {
         this.onLobbyChange = null;
         this.onMatchStart = null;
         this.sink = sink;
-        this.lobby = new Lobby(opts.hostUrl ?? "", opts.map ?? "twin_rivers", opts.roomCode);
+        this.lobby = new Lobby(opts.hostUrl ?? "", opts.map ?? "twin_spear", opts.roomCode);
     }
     // Read-only access to the running match (null until started). Exposed so headless tests can drive
     // the sim deterministically (step + inspect world) over a mock peer sink — never used in the app.

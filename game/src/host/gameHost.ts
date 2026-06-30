@@ -88,7 +88,7 @@ export class GameHost {
 
   constructor(sink: HostPeerSink, opts: GameHostOptions = {}) {
     this.sink = sink;
-    this.lobby = new Lobby(opts.hostUrl ?? "", opts.map ?? "twin_rivers", opts.roomCode);
+    this.lobby = new Lobby(opts.hostUrl ?? "", opts.map ?? "twin_spear", opts.roomCode);
   }
 
   // Read-only access to the running match (null until started). Exposed so headless tests can drive

@@ -23,7 +23,7 @@ export class Menu {
         this.onlineSplit = false;
         this.localBSlot = -1;
         // ---------- Single Player (vs AI) ----------
-        this.spCfg = { map: "twin_rivers", difficulty: "normal", color: PALETTE[0], aiCount: 1 };
+        this.spCfg = { map: "twin_spear", difficulty: "normal", color: PALETTE[0], aiCount: 1 };
         // ---------- Settings → Keyboard (remappable bindings, spec §24 → T24) ----------
         this.capturing = null;
         this.captureHandler = null;
@@ -208,11 +208,13 @@ export class Menu {
             }
         ctx.fillStyle = "#cdd6df";
         for (const n of m.neutrals) {
+            // T34: fortress markers render white; outpost/derrick stay grey.
+            ctx.fillStyle = n.kind === "fortress" ? "#eef2f6" : "#9aa4ad";
             ctx.beginPath();
-            ctx.arc(n.x * sx, n.y * sy, 2, 0, Math.PI * 2);
+            ctx.arc(n.x * sx, n.y * sy, n.kind === "fortress" ? 3 : 2, 0, Math.PI * 2);
             ctx.fill();
         }
-        const spawnColors = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc"];
+        const spawnColors = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6", "#a3e635"];
         m.spawns.forEach((s, i) => {
             ctx.fillStyle = spawnColors[i % spawnColors.length];
             ctx.beginPath();
@@ -227,7 +229,7 @@ export class Menu {
     // This path runs an in-page MatchHost over LoopbackTransport. A browser cannot run a WebSocket
     // server, so it can NEVER accept remote devices — for that the user runs the real Node host
     // (host.bat / host.sh / host.command). Hence no join URL/QR is shown here (spec §24 T25 #2/#3).
-    showLobby(map = "twin_rivers") {
+    showLobby(map = "twin_spear") {
         this.lobby = new Lobby("", map);
         this.lobby.onChange = () => this.renderLobby();
         this.renderLobby();

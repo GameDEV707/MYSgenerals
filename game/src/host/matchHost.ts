@@ -257,6 +257,7 @@ export class MatchHost implements CommandSink {
     if (e.isVehicle) fl |= FL.vehicle;
     if (e.weaponDef) fl |= FL.weapon;
     if (e.hero) fl |= FL.hero;
+    if (e.hostileNeutral) fl |= FL.hostile; // T34: fortress keep + garrison → white, two-way targetable
     const k: EntitySnap["k"] = e.kind === "building" ? "b" : e.kind === "neutral" ? "n" : "u";
     const s: EntitySnap = {
       id: e.id, k, t: e.type, o: e.owner,

@@ -1,7 +1,7 @@
 // MYS Generals — canvas world renderer (spec §1, §15 fog, §16 visuals).
 // Reads ONLY from the client WorldView (snapshot-reconstructed, fog-filtered). It never
 // touches the authoritative sim, so it cannot render entities the host didn't send.
-import { NEUTRAL } from "../client/worldView.js";
+import { NEUTRAL, NEUTRAL_FORTRESS_COLOR } from "../client/worldView.js";
 import { BUILDING_DEFS, MINE_EMBLEM_COLORS } from "../data.js";
 import { DEFENSE_RANGE_PER_LEVEL } from "../constants.js";
 const TERRAIN_COLORS = ["#3c5a3a", "#5a5048", "#26506b", "#6b6258", "#71727a"]; // grass, cliff, water, road, wall (T32)
@@ -123,6 +123,14 @@ export class Renderer {
         if (owner === NEUTRAL)
             return "#9aa4ad";
         return this.world.players[owner]?.color ?? "#888";
+    }
+    // T34: entity-aware colour — the hostile Neutral Fortress + its garrison render near-white; other
+    // neutrals (derrick/outpost) stay grey; a captured fortress takes the capturer's colour (its owner
+    // flipped, so this falls through to teamColor).
+    entityColor(e) {
+        if (e.owner === NEUTRAL && e.hostileNeutral)
+            return NEUTRAL_FORTRESS_COLOR;
+        return this.teamColor(e.owner);
     }
     updateVisibility() {
         this.visible.fill(0);
@@ -351,7 +359,7 @@ export class Renderer {
         const def = BUILDING_DEFS[e.type];
         const s = def.footprint * z;
         const x = this.toX(e.pos.x) - s / 2, y = this.toY(e.pos.y) - s / 2;
-        const col = this.teamColor(e.owner);
+        const col = this.entityColor(e);
         ctx.fillStyle = e.constructing ? "rgba(60,70,80,0.5)" : "#1a2530";
         this.roundRect(x, y, s, s, 4);
         ctx.fill();
@@ -464,10 +472,14 @@ export class Renderer {
             this.drawOutpost(e, x, y, z);
             return;
         }
+        if (e.type === "fortress") {
+            this.drawFortress(e, x, y, z);
+            return;
+        }
         ctx.fillStyle = "#2a2018";
         this.roundRect(x - s / 2, y - s / 2, s, s, 4);
         ctx.fill();
-        ctx.strokeStyle = this.teamColor(e.owner);
+        ctx.strokeStyle = this.entityColor(e);
         ctx.lineWidth = 2;
         this.roundRect(x - s / 2, y - s / 2, s, s, 4);
         ctx.stroke();
@@ -482,7 +494,7 @@ export class Renderer {
         ctx.moveTo(x + s * 0.3, y - s * 0.5);
         ctx.lineTo(x + s * 0.3, y - s * 0.8);
         ctx.stroke();
-        ctx.fillStyle = this.teamColor(e.owner);
+        ctx.fillStyle = this.entityColor(e);
         ctx.fillRect(x + s * 0.3, y - s * 0.8, s * 0.25, s * 0.15);
         if (e.captureProgress > 0) {
             ctx.strokeStyle = this.teamColor(e.captureOwner);
@@ -491,6 +503,68 @@ export class Renderer {
             ctx.arc(x, y, s * 0.7, -Math.PI / 2, -Math.PI / 2 + e.captureProgress * Math.PI * 2);
             ctx.stroke();
         }
+        if (this.selection.has(e.id))
+            this.drawSelection(e, s * 0.6);
+    }
+    // T34: a Neutral FORTRESS keep — a big (4-footprint) white stronghold with battlements, a rotating
+    // turret and an HP bar (it is damageable; the bar shows the siege progress). A faint white "siege"
+    // ring pulses while it is being shot. Once captured, entityColor returns the capturer's colour so
+    // the whole keep + garrison re-tint to the new owner automatically.
+    drawFortress(e, x, y, z) {
+        const ctx = this.ctx;
+        const s = 3.6 * z;
+        const col = this.entityColor(e);
+        // keep body
+        ctx.fillStyle = "#20262e";
+        this.roundRect(x - s / 2, y - s / 2, s, s, 6);
+        ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 3;
+        this.roundRect(x - s / 2, y - s / 2, s, s, 6);
+        ctx.stroke();
+        // battlements (crenellations) on all four sides
+        ctx.fillStyle = col;
+        for (let i = 0; i < 5; i++) {
+            const fx = x - s / 2 + i * s / 5 + s * 0.03;
+            ctx.fillRect(fx, y - s / 2 - s * 0.08, s * 0.13, s * 0.12);
+            ctx.fillRect(fx, y + s / 2 - s * 0.04, s * 0.13, s * 0.12);
+        }
+        // corner towers
+        for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+            ctx.fillStyle = "#2b333c";
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x + dx * s * 0.4, y + dy * s * 0.4, s * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        }
+        // crown emblem (white-faction crest)
+        ctx.fillStyle = col;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = `${Math.floor(s * 0.34)}px serif`;
+        ctx.fillText("♛", x, y - s * 0.04);
+        // rotating garrison turret
+        ctx.strokeStyle = "#e6edf3";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(e.turret) * s * 0.5, y + Math.sin(e.turret) * s * 0.5);
+        ctx.stroke();
+        ctx.fillStyle = "#cfd8e0";
+        ctx.beginPath();
+        ctx.arc(x, y, s * 0.14, 0, Math.PI * 2);
+        ctx.fill();
+        // siege ring while being damaged (HP below full)
+        if (e.hp < e.maxHp) {
+            ctx.strokeStyle = "rgba(238,242,246,0.35)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y, s * 0.62, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        this.drawHpBar(e, s);
         if (this.selection.has(e.id))
             this.drawSelection(e, s * 0.6);
     }
@@ -545,7 +619,7 @@ export class Renderer {
     drawUnit(e) {
         const ctx = this.ctx, z = this.cam.zoom;
         const x = this.toX(e.pos.x), y = this.toY(e.pos.y);
-        const col = this.teamColor(e.owner);
+        const col = this.entityColor(e);
         const r = e.radius * z;
         const sh = unitShape(e.type);
         if (this.selection.has(e.id))
@@ -1030,7 +1104,7 @@ export class Renderer {
             }
         for (const e of this.world.entities) {
             ctx.globalAlpha = e.stub ? 0.5 : 1;
-            ctx.fillStyle = this.teamColor(e.owner);
+            ctx.fillStyle = this.entityColor(e);
             const sz = e.kind === "building" ? 4 : 2;
             ctx.fillRect(e.pos.x * sx - sz / 2, e.pos.y * sy - sz / 2, sz, sz);
         }

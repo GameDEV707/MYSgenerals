@@ -2,7 +2,7 @@
 // (slots, colors, heroes, ready, AI, kick, map, split-screen). The menu uses it directly for a
 // locally-hosted game (M1); the Node server reuses the exact same logic for LAN lobbies (M2).
 import { getMap } from "../sim/map.js";
-export const PALETTE = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc"];
+export const PALETTE = ["#4ea3ff", "#ff5a4d", "#34d399", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6", "#a3e635"];
 // Default side colours for custom-team mode: [0] = blue side, [1] = red side. Editable in the lobby.
 export const TEAM_COLORS = ["#4ea3ff", "#ff5a4d"];
 function randomRoomCode() {
@@ -13,7 +13,7 @@ function randomRoomCode() {
     return s;
 }
 export class Lobby {
-    constructor(hostUrl, map = "twin_rivers", roomCode = randomRoomCode()) {
+    constructor(hostUrl, map = "twin_spear", roomCode = randomRoomCode()) {
         // host-side per-slot metadata (not all serialized to clients)
         this.local = []; // slot is a local player on the host machine (loopback)
         // split-screen: the host provides a 2nd LOCAL human (Player B) in the first open slot

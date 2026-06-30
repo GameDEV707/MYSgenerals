@@ -22,7 +22,7 @@ function recorder(playerId) {
   return r;
 }
 
-const map = getMap("twin_rivers");
+const map = getMap("twin_spear");
 const world = new World(map);
 world.addPlayer(mkPlayer(0, false, "#4ea3ff"));
 world.addPlayer(mkPlayer(1, false, "#ff5a4d")); // no AI: enemy stays idle so tests are deterministic

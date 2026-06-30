@@ -19,7 +19,7 @@ const sink = {
 const msgs = (peerId) => log.get(peerId) ?? [];
 const last = (peerId, m) => { const a = msgs(peerId).filter((x) => x.m === m); return a[a.length - 1]; };
 
-const host = new GameHost(sink, { hostUrl: "", map: "twin_rivers", roomCode: "TEST" });
+const host = new GameHost(sink, { hostUrl: "", map: "twin_spear", roomCode: "TEST" });
 
 console.log("Join + slot assignment (host slot 0 via loopback, joiner slot 1):");
 // Host's own browser connects over loopback → claims slot 0.

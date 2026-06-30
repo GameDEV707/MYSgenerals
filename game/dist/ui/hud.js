@@ -310,7 +310,7 @@ export class HUD {
             if (def0.weapon && !def0.produces && !def0.isWall)
                 return this.defensePanelHtml(b0);
             return `<h4>${t(def0.nameKey)}</h4>
-        <div class="grid"><div class="cmd" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div></div>`;
+        <div class="grid"><div class="cmd gridbtn" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div></div>`;
         }
         return ""; // nothing own selected → panel hidden (no placeholder)
     }
@@ -358,7 +358,7 @@ export class HUD {
       <div class="defstats">${t("hud.range", { n: range })} · ${t("hud.damage", { n: dmg })}</div>
       <div class="grid">
         ${this.levelUpBtn(b, MAX_DEFENSE_LEVEL)}
-        <div class="cmd" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div>
+        <div class="cmd gridbtn" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div>
       </div>`;
     }
     // A timed level-upgrade button shared by the Command Center and defensive towers. Disabled while
@@ -395,7 +395,7 @@ export class HUD {
         const btns = RESEARCH_DEFS.map((d) => this.researchBtn(d)).join("");
         return `${head}
       <div class="grid research-grid">${btns}</div>
-      <div class="grid"><div class="cmd" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div></div>`;
+      <div class="grid"><div class="cmd gridbtn" data-act="sell"><span class="ic">💰</span>${t("cmd.sell")}</div></div>`;
     }
     researchOwned(def) {
         const r = this.me().research;

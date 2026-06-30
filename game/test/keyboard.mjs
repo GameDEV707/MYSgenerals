@@ -30,7 +30,7 @@ function makeRenderer(vx, w) {
 }
 function miner(id, owner, x, y) { return { id, owner, kind: "unit", type: "miner", stub: false, radius: 0.4, pos: { x, y } }; }
 function makeWorld(me, entities) {
-  return { me, entities, byId: new Map(entities.map((e) => [e.id, e])), players: [{ heroId: 0 }, { heroId: 0 }], sends: [], send(c) { this.sends.push(c); } };
+  return { me, entities, byId: new Map(entities.map((e) => [e.id, e])), players: [{ heroId: 0 }, { heroId: 0 }], isAlly(o) { return o === this.me; }, economyOwner() { return this.me; }, sends: [], send(c) { this.sends.push(c); } };
 }
 const audio = { resume() {}, play() {} };
 

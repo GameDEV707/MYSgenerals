@@ -35,7 +35,7 @@ function hero(id, owner) { return { id, owner, kind: "unit", type: "hero", stub:
 function makeWorld(me, entities, heroId) {
   const players = [{ heroId: 0 }, { heroId: 0 }];
   players[me] = { heroId };
-  return { me, entities, byId: new Map(entities.map((e) => [e.id, e])), players, sends: [], send(c) { this.sends.push(c); } };
+  return { me, entities, byId: new Map(entities.map((e) => [e.id, e])), players, isAlly(o) { return o === this.me; }, economyOwner() { return this.me; }, sends: [], send(c) { this.sends.push(c); } };
 }
 const audio = { resume() {}, play() {} };
 

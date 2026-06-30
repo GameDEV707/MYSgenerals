@@ -150,7 +150,9 @@ export class Renderer {
     this.visible.fill(0);
     const m = this.world.map;
     for (const e of this.world.entities) {
-      if (e.owner !== this.world.me || e.stub) continue;
+      // Custom-team co-op: a side shares fog — reveal bright tiles around ALLY units too, not just
+      // our own, so a teammate actually sees the shared base/units (classic: only our own reveal).
+      if (!this.world.isAlly(e.owner) || e.stub) continue;
       const r = e.vision; const cx = Math.floor(e.pos.x), cy = Math.floor(e.pos.y);
       for (let dy = -Math.ceil(r); dy <= Math.ceil(r); dy++) for (let dx = -Math.ceil(r); dx <= Math.ceil(r); dx++) {
         if (dx * dx + dy * dy > r * r) continue;
@@ -336,18 +338,18 @@ export class Renderer {
     const slots = entityOverlayLayout(y, this._ov);
     if (e.constructing) {
       this.bar(x, slots.secY, s, slots.barH, e.buildProgress, "#ffb020");
-    } else if (e.owner === this.world.me && e.upgrading) {
+    } else if (this.world.isAlly(e.owner) && e.upgrading) {
       // T30: timed level-upgrade progress (Command Center / defensive tower), gold like a rank-up.
       this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.upgrading.progress), "#ffd23f");
-    } else if (e.owner === this.world.me && e.queue.length > 0) {
-      // on-map head-item production bar over the local player's producing buildings
+    } else if (this.world.isAlly(e.owner) && e.queue.length > 0) {
+      // on-map head-item production bar over the side's producing buildings (shared in team co-op)
       this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.queue[0].progress), "#38bdf8");
-    } else if (e.owner === this.world.me && e.researching) {
+    } else if (this.world.isAlly(e.owner) && e.researching) {
       this.bar(x, slots.secY, s, slots.barH, Math.min(1, e.researching.progress), "#a78bfa");
     }
     // T29 Part B: a thin resource-coloured progress ring over the SELECTED own mine showing fill
     // toward the next +1 (consistent with the overlay stack — drawn around the tile, above the bars).
-    if (e.owner === this.world.me && this.selection.has(e.id) && e.mineEta && !e.mineEta.idle) {
+    if (this.world.isAlly(e.owner) && this.selection.has(e.id) && e.mineEta && !e.mineEta.idle) {
       const mc = MINE_EMBLEM_COLORS[e.type as BuildingId] || "#c9d1d9";
       this.drawMineRing(this.toX(e.pos.x), this.toY(e.pos.y), s * 0.62, e.mineEta.progress, mc);
     }
@@ -365,7 +367,7 @@ export class Renderer {
     // Rally "flag(s)": for a selected OWN building, draw a flag at each rally point and a dashed
     // guide line from the building. The Command Center has two — a Miner flag (green) and an
     // Engineer flag (cyan); other producers have one general flag (green).
-    if (e.owner === this.world.me && this.selection.has(e.id)) {
+    if (this.world.isAlly(e.owner) && this.selection.has(e.id)) {
       if (e.rally) this.drawRallyFlag(e.rally.x, e.rally.y, e.pos.x, e.pos.y, "#34d399");
       if (e.rally2) this.drawRallyFlag(e.rally2.x, e.rally2.y, e.pos.x, e.pos.y, "#38bdf8");
     }
@@ -569,7 +571,7 @@ export class Renderer {
   // local player's hero.
   private shouldShowHp(e: ViewEntity): boolean {
     if (this.selection.has(e.id)) return true;
-    if (e.hero && e.owner === this.world.me) return true;
+    if (e.hero && this.world.isAlly(e.owner)) return true;
     if (e.hp < e.maxHp) return true;
     if (e.hitFlash > 0) return true;
     const d = Math.hypot(e.pos.x - this.mouseWorld.x, e.pos.y - this.mouseWorld.y);
@@ -591,7 +593,7 @@ export class Renderer {
     ctx.fillStyle = color; ctx.fillRect(x, y, Math.max(0, w * frac), h);
   }
   private drawSelection(e: ViewEntity, r: number): void {
-    const ctx = this.ctx; ctx.strokeStyle = e.owner === this.world.me ? "#34d399" : "#ef4444"; ctx.lineWidth = 2;
+    const ctx = this.ctx; ctx.strokeStyle = this.world.isAlly(e.owner) ? "#34d399" : "#ef4444"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(this.toX(e.pos.x), this.toY(e.pos.y), r, 0, Math.PI * 2); ctx.stroke();
   }
 

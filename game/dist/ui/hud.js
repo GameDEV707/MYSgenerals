@@ -173,7 +173,7 @@ export class HUD {
         const me = this.world.me;
         let bT = 0, bF = 0, rT = 0, rF = 0, mT = 0, mF = 0;
         for (const e of this.world.entities) {
-            if (e.owner !== me || e.kind !== "unit")
+            if (!this.world.isAlly(e.owner) || e.kind !== "unit")
                 continue;
             if (e.type === "engineer") {
                 bT++;
@@ -222,7 +222,7 @@ export class HUD {
             return;
         }
         const sel = this.selectedEntities();
-        const own = sel.filter((e) => e.owner === me);
+        const own = sel.filter((e) => this.world.isAlly(e.owner));
         // T31: the build menu opens on the ENGINEER (builder), not the Miner (which is mining-only and
         // usually working inside a mine, hidden).
         const builder = own.find((e) => e.type === "engineer");
@@ -362,7 +362,7 @@ export class HUD {
     // it) — i.e. genuinely assignable. `mineEta` is sent for own mines only; `free` is the host's
     // claimed-slot check. Built (non-constructing) mines only.
     assignableMines() {
-        return this.world.entities.filter((e) => e.owner === this.world.me && !e.constructing && !!e.mineEta && e.mineEta.free === true);
+        return this.world.entities.filter((e) => this.world.isAlly(e.owner) && !e.constructing && !!e.mineEta && e.mineEta.free === true);
     }
     // Miner command panel: a button per assignable mine (named, resource-coloured gem). Clicking one
     // sends the selected miner(s) to work it. If no mine is free, prompt to build one.
@@ -608,7 +608,7 @@ export class HUD {
         }
         if (act === "mineassign") {
             const mineId = parseInt(el.dataset.mine || "0", 10);
-            const miners = this.selectedEntities().filter((e) => e.owner === me && e.type === "miner").map((e) => e.id);
+            const miners = this.selectedEntities().filter((e) => this.world.isAlly(e.owner) && e.type === "miner").map((e) => e.id);
             if (mineId && miners.length)
                 this.world.send({ t: "mine", ids: miners, target: mineId });
             this.audio.play("click");
@@ -644,7 +644,7 @@ export class HUD {
             this.audio.play("click");
             return;
         }
-        const units = this.selectedEntities().filter((e) => e.owner === me && e.kind === "unit").map((e) => e.id);
+        const units = this.selectedEntities().filter((e) => this.world.isAlly(e.owner) && e.kind === "unit").map((e) => e.id);
         if (act === "stop")
             this.world.send({ t: "stop", ids: units });
         if (act === "hold")
@@ -653,23 +653,23 @@ export class HUD {
             this.input.pendingAttackMove = true;
         if (act === "sell") {
             for (const e of this.selectedEntities())
-                if (e.owner === me && e.kind === "building")
+                if (this.world.isAlly(e.owner) && e.kind === "building")
                     this.world.send({ t: "sell", building: e.id });
         }
         this.audio.play("click");
     }
     // The selected producing building / research center shown in the panel (for keyboard activation).
     selectedProd() {
-        return this.selectedEntities().find((e) => e.owner === this.world.me && e.kind === "building" && !!BUILDING_DEFS[e.type].produces);
+        return this.selectedEntities().find((e) => this.world.isAlly(e.owner) && e.kind === "building" && !!BUILDING_DEFS[e.type].produces);
     }
     selectedResearch() {
-        return this.selectedEntities().find((e) => e.owner === this.world.me && e.type === "research_center");
+        return this.selectedEntities().find((e) => this.world.isAlly(e.owner) && e.type === "research_center");
     }
     // T30: the player's highest own Command-Center level (gates the build menu). Defaults to 1.
     baseLevel() {
         let lvl = 1;
         for (const e of this.world.entities) {
-            if (e.owner === this.world.me && e.type === "command_center" && !e.constructing && e.level > lvl)
+            if (this.world.isAlly(e.owner) && e.type === "command_center" && !e.constructing && e.level > lvl)
                 lvl = e.level;
         }
         return lvl;
@@ -678,7 +678,7 @@ export class HUD {
     // defensive tower (weapon, not a producer, not a wall).
     selectedUpgradable() {
         return this.selectedEntities().find((e) => {
-            if (e.owner !== this.world.me || e.kind !== "building")
+            if (!this.world.isAlly(e.owner) || e.kind !== "building")
                 return false;
             const def = BUILDING_DEFS[e.type];
             return e.type === "command_center" || e.type === "radar" || (!!def.weapon && !def.produces && !def.isWall);
@@ -707,7 +707,7 @@ export class HUD {
     // panel (the economy/military/defense/tech tabs) is shown. (T31: the builder is the Engineer.)
     minerPanelShown() {
         const me = this.world.me;
-        const own = this.selectedEntities().filter((e) => e.owner === me);
+        const own = this.selectedEntities().filter((e) => this.world.isAlly(e.owner));
         const builder = own.find((e) => e.type === "engineer");
         const research = own.find((e) => e.kind === "building" && e.type === "research_center");
         const prod = own.find((e) => e.kind === "building" && BUILDING_DEFS[e.type].produces);
@@ -772,7 +772,7 @@ export class HUD {
         }
         // T29 Part B: for the local player's own resource mines, show the extraction countdown to the
         // next +1 (or an "assign miners" hint for an idle silver mine) plus which resource it yields.
-        if (e.owner === this.world.me && e.mineEta)
+        if (this.world.isAlly(e.owner) && e.mineEta)
             extra += this.mineEtaHtml(e.mineEta);
         // T30 Part B: a defensive tower shows its level + the radius it sees/fires in and its damage.
         if (e.kind === "building") {

@@ -261,7 +261,7 @@ export class InputController {
     const b = this.r.screenToWorld(Math.max(x1, x2), Math.max(y1, y2));
     let any = false;
     for (const e of this.world.entities) {
-      if (e.owner !== this.world.me || e.kind !== "unit") continue;
+      if (!this.world.isAlly(e.owner) || e.kind !== "unit") continue;
       if (e.pos.x >= a.x && e.pos.x <= b.x && e.pos.y >= a.y && e.pos.y <= b.y) { this.r.selection.add(e.id); any = true; }
     }
     if (any) this.audio.play("click");
@@ -269,7 +269,7 @@ export class InputController {
 
   private ownUnits(): number[] {
     const ids: number[] = [];
-    for (const id of this.r.selection) { const e = this.world.byId.get(id); if (e && e.owner === this.world.me && e.kind === "unit") ids.push(id); }
+    for (const id of this.r.selection) { const e = this.world.byId.get(id); if (e && this.world.isAlly(e.owner) && e.kind === "unit") ids.push(id); }
     return ids;
   }
 
@@ -279,7 +279,7 @@ export class InputController {
     let any = false;
     for (const id of this.r.selection) {
       const e = this.world.byId.get(id);
-      if (e && e.owner === this.world.me && e.kind === "building") { this.world.send({ t: "rally", building: e.id, x: wx, y: wy, slot }); any = true; }
+      if (e && this.world.isAlly(e.owner) && e.kind === "building") { this.world.send({ t: "rally", building: e.id, x: wx, y: wy, slot }); any = true; }
     }
     if (any) { this.audio.play("click"); this.r.fx.addCmdMarker(wx, wy, "move", slot === 1 ? "#38bdf8" : "#34d399"); }
   }
@@ -297,6 +297,13 @@ export class InputController {
   }
 
   private heroEntity(): ViewEntity | undefined {
+    // Custom-team co-op: drive whichever hero THIS player has selected (so each split-screen friend
+    // controls the hero they picked, and either can command the other's hero). Fall back to this
+    // player's own hero when nothing hero-like is selected — classic single-hero behaviour.
+    for (const id of this.r.selection) {
+      const e = this.world.byId.get(id);
+      if (e && e.hero && this.world.isAlly(e.owner)) return e;
+    }
     const id = this.world.players[this.world.me]?.heroId; return id ? this.world.byId.get(id) : undefined;
   }
 
@@ -311,7 +318,7 @@ export class InputController {
   private issueCommandAt(sx: number, sy: number): void {
     const w = this.r.screenToWorld(sx, sy);
     const me = this.world.me;
-    const selBuildings = [...this.r.selection].map((i) => this.world.byId.get(i)).filter((b): b is ViewEntity => !!b && b.owner === me && b.kind === "building");
+    const selBuildings = [...this.r.selection].map((i) => this.world.byId.get(i)).filter((b): b is ViewEntity => !!b && this.world.isAlly(b.owner) && b.kind === "building");
     const units = this.ownUnits();
     const tgt = this.entityAt(sx, sy);
     if (units.length === 0 && selBuildings.length > 0) {
@@ -319,7 +326,7 @@ export class InputController {
       this.audio.play("click"); this.r.fx.addCmdMarker(w.x, w.y, "move", "#34d399"); return;
     }
     if (units.length === 0) return;
-    if (tgt && tgt.owner !== me && tgt.owner !== NEUTRAL) {
+    if (tgt && !this.world.isAlly(tgt.owner) && tgt.owner !== NEUTRAL) {
       this.world.send({ t: "attack", ids: units, target: tgt.id }); this.audio.play("click");
       this.r.fx.addCmdMarker(tgt.pos.x, tgt.pos.y, "attack", "#ff5a4d"); return;
     }
@@ -327,7 +334,7 @@ export class InputController {
     // spare slot are accepted; sending a miner to a taken mine is rejected so it doesn't trek over
     // and then wander off to a distant free mine. (The silver-only check here was the main cause of
     // miners "staggering" when right-clicked onto iron/gold mines, which fell through to a move.)
-    if (tgt && tgt.owner === me && isMineType(tgt.type)) {
+    if (tgt && this.world.isAlly(tgt.owner) && isMineType(tgt.type)) {
       const miners = units.filter((id) => this.world.byId.get(id)?.type === "miner");
       if (miners.length) {
         if (tgt.mineEta && tgt.mineEta.free === false) { this.audio.play("deny"); return; }
@@ -389,7 +396,9 @@ export class InputController {
   private placeBuilding(wx: number, wy: number): void {
     if (!this.r.placing) return;
     const tx = Math.floor(wx), ty = Math.floor(wy);
-    this.world.send({ t: "build", owner: this.world.me, building: this.r.placing.building, x: tx, y: ty });
+    // Custom-team co-op: a new building is owned by (and charged to) the side's shared base owner, so
+    // both friends build into one base. In classic this is just the player themselves.
+    this.world.send({ t: "build", owner: this.world.economyOwner(), building: this.r.placing.building, x: tx, y: ty });
     this.audio.play("build");
     this.r.placing = null;
   }
@@ -415,7 +424,7 @@ export class InputController {
   trainFromSelection(u: UnitId): void {
     for (const id of this.r.selection) {
       const e = this.world.byId.get(id);
-      if (e && e.owner === this.world.me && e.kind === "building") this.world.send({ t: "train", building: e.id, unit: u });
+      if (e && this.world.isAlly(e.owner) && e.kind === "building") this.world.send({ t: "train", building: e.id, unit: u });
     }
   }
 

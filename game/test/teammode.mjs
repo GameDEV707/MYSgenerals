@@ -65,6 +65,38 @@ const redPlayers = w.players.filter((p) => p.team === 1);
 assert(redPlayers.every((p) => p.defeated), "losing the side's only base eliminates ALL its members");
 assert(w.winner >= 0 && w.players[w.winner].team === 0, "the surviving side wins");
 
+console.log("Shared vision + shared economy/control (the reported bug):");
+import { MatchHost } from "../dist/host/matchHost.js";
+const map2 = getMap("crossfire");
+const w2 = new World(map2);
+// team 0 = players 0 (leader, base) + 1 (hero-only teammate); team 1 = player 2 (enemy)
+[ [0,0], [1,0], [2,1] ].forEach(([id, tm]) => w2.addPlayer(mkPlayer(id, tm)));
+w2.spawnAllBases("team");
+const host = new MatchHost(w2);
+const leaderCC = w2.entities.find((e) => e.type === "command_center" && e.owner === 0);
+// player 1 is the hero-only teammate — without vision sharing it could never see the base.
+const grid1 = host.computeVisibility(1);
+const ccTileVisible = grid1[Math.floor(leaderCC.pos.y) * map2.w + Math.floor(leaderCC.pos.x)] === 1;
+assert(ccTileVisible, "teammate (hero-only) shares vision of the team's HQ tile");
+
+const snap1 = host.buildSnapshot(1, grid1);
+const seesCC = snap1.entities.some((e) => e.id === leaderCC.id && e.o === 0);
+assert(seesCC, "teammate's snapshot includes the shared HQ (was the missing bosh shtab)");
+// the HQ comes through as full detail (own/ally), so its queue/level data is available to control it
+const ccSnap = snap1.entities.find((e) => e.id === leaderCC.id);
+assert(ccSnap && ("q" in ccSnap || ccSnap.k === "b"), "shared HQ arrives as full-detail (controllable) entity");
+
+// shared economy: the teammate's HUD economy reflects the side's base owner, not their empty purse
+w2.players[0].silver = 123; w2.players[1].silver = 7;
+const snap1b = host.buildSnapshot(1, host.computeVisibility(1));
+const you1 = snap1b.players.find((p) => p.id === 1);
+assert(you1.silver === 123, "teammate sees the SIDE's shared economy (base owner's silver)");
+
+// the enemy's HQ is NOT shared with team 0 (fog still applies across sides)
+const enemyCC = w2.entities.find((e) => e.type === "command_center" && e.owner === 2);
+const enemyTileVisible = grid1[Math.floor(enemyCC.pos.y) * map2.w + Math.floor(enemyCC.pos.x)] === 1;
+assert(!enemyTileVisible, "enemy side's HQ stays hidden (no cross-side vision leak)");
+
 console.log("");
 if (failures === 0) { console.log("ALL TEAM-MODE TESTS PASSED ✓"); process.exit(0); }
 else { console.error(failures + " TEAM-MODE TEST(S) FAILED ✗"); process.exit(1); }

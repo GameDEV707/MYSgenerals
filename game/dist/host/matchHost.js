@@ -141,13 +141,35 @@ export class MatchHost {
         return snap;
     }
     // ---- fog of war (spec §15) ----
-    // Union of vision radii of the player's own entities.
+    // Custom-team co-op: a side shares vision. The set of player ids on `pid`'s side (just [pid] in
+    // classic free-for-all, where team < 0).
+    teamIds(pid) {
+        const t = this.world.players[pid]?.team;
+        if (t === undefined || t < 0)
+            return [pid];
+        return this.world.players.filter((p) => p.team === t).map((p) => p.id);
+    }
+    // The side's shared base owner — the ally holding a Command Center (lowest id), else lowest ally
+    // id. Its economy/research is shown to EVERY teammate so the side runs one shared base.
+    economyOwner(pid) {
+        const mem = this.teamIds(pid);
+        let best = -1;
+        for (const e of this.world.entities) {
+            if (e.dead || e.type !== "command_center")
+                continue;
+            if (mem.includes(e.owner) && (best < 0 || e.owner < best))
+                best = e.owner;
+        }
+        return best >= 0 ? best : Math.min(...mem);
+    }
+    // Union of vision radii of the entities owned by ANY member of the player's side.
     computeVisibility(pid) {
         const m = this.world.map;
         const g = this.visBuf;
         g.fill(0);
+        const mem = new Set(this.teamIds(pid));
         for (const e of this.world.entities) {
-            if (e.owner !== pid || e.dead)
+            if (!mem.has(e.owner) || e.dead)
                 continue;
             const r = e.vision;
             const cx = Math.floor(e.pos.x), cy = Math.floor(e.pos.y);
@@ -174,17 +196,20 @@ export class MatchHost {
     // ---- snapshot assembly (per recipient, fog-filtered → anti-maphack) ----
     buildSnapshot(pid, grid) {
         const w = this.world;
-        const mem = this.memory.get(pid);
+        const teammates = new Set(this.teamIds(pid)); // own side (just [pid] in classic free-for-all)
+        const isMine = (owner) => teammates.has(owner); // ally-owned counts as "own": full detail
+        const eco = w.players[this.economyOwner(pid)]; // the side's shared base owner (economy source)
+        const mem = this.memory.get(pid) ?? new Map();
         const entities = [];
         for (const e of w.entities) {
             if (e.dead)
                 continue;
             if (e.inMine)
                 continue; // T30: miners working inside a mine are hidden from everyone
-            if (e.owner === pid) {
+            if (isMine(e.owner)) {
                 entities.push(this.snapEntity(e, true));
                 continue;
-            } // own: full detail
+            } // own/ally: full detail
             const visible = this.visAt(grid, e.pos.x, e.pos.y);
             if (e.owner === NEUTRAL) {
                 if (visible)
@@ -211,26 +236,31 @@ export class MatchHost {
         const players = w.players.map((p) => {
             const base = { id: p.id, color: p.color, defeated: p.defeated, team: p.team };
             if (p.id === pid) {
-                base.silver = p.silver;
-                base.iron = p.iron;
-                base.gold = p.gold;
-                base.powerGen = p.powerGen;
-                base.powerUse = p.powerUse;
-                base.brownout = p.brownout;
+                // Shared-economy co-op: a teammate sees their SIDE's economy/research/stats (from the base
+                // owner) so both friends manage one base, but keeps their OWN hero so each drives their own.
+                base.silver = eco.silver;
+                base.iron = eco.iron;
+                base.gold = eco.gold;
+                base.powerGen = eco.powerGen;
+                base.powerUse = eco.powerUse;
+                base.brownout = eco.brownout;
                 base.heroId = p.heroId;
                 base.heroLevel = p.heroLevel;
                 base.heroXp = p.heroXp;
                 base.heroRespawnAt = p.heroRespawnAt;
-                base.research = { weapons: p.research.weapons, armor: p.research.armor, factoryTech: p.research.factoryTech, logistics: p.research.logistics };
-                base.unitsBuilt = p.unitsBuilt;
-                base.unitsLost = p.unitsLost;
-                base.buildingsDestroyed = p.buildingsDestroyed;
+                base.research = { weapons: eco.research.weapons, armor: eco.research.armor, factoryTech: eco.research.factoryTech, logistics: eco.research.logistics };
+                base.unitsBuilt = eco.unitsBuilt;
+                base.unitsLost = eco.unitsLost;
+                base.buildingsDestroyed = eco.buildingsDestroyed;
+            }
+            else if (teammates.has(p.id)) {
+                base.heroLevel = p.heroLevel; // ally hero level for the selection-box label
             }
             return base;
         });
         const banners = [];
         for (const b of w.banners) {
-            if (b.owner === pid || this.visAt(grid, b.pos.x, b.pos.y))
+            if (teammates.has(b.owner) || this.visAt(grid, b.pos.x, b.pos.y))
                 banners.push({ owner: b.owner, x: b.pos.x, y: b.pos.y });
         }
         // Orbital-strike telegraphs are visible to all (spec §16.7).
@@ -314,7 +344,7 @@ export class MatchHost {
     // ---- event fog-filtering (spec §20.3/§20.5 anti-maphack) ----
     eventVisibleTo(ev, pid, grid) {
         switch (ev.e) {
-            case "toast": return ev.to === undefined || ev.to === pid;
+            case "toast": return ev.to === undefined || this.teamIds(pid).includes(ev.to);
             case "shake":
             case "flash": return true; // global screen effects (no entity info leaked)
             case "fire": return ev.owner === pid || this.visAt(grid, ev.from.x, ev.from.y) || this.visAt(grid, ev.to.x, ev.to.y);

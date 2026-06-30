@@ -37,6 +37,17 @@ export class AIController {
         return this.world.entities.filter((e) => e.owner === this.owner && e.type === type && !e.dead);
     }
     cc() { return this.world.entities.find((e) => e.owner === this.owner && e.type === "command_center" && !e.dead); }
+    // Custom-team aware: an owner is hostile only if it is neither neutral, ourselves, nor an ally on
+    // the same side. In classic free-for-all (team < 0) this is just "anyone but me and neutral".
+    isEnemyOwner(owner) {
+        if (owner === this.owner || owner === NEUTRAL)
+            return false;
+        const mt = this.world.players[this.owner]?.team;
+        const ot = this.world.players[owner]?.team;
+        if (mt !== undefined && mt >= 0 && ot === mt)
+            return false; // same side → ally
+        return true;
+    }
     manageEconomy(p) {
         const cc = this.cc();
         // T31: keep a builder. Train one Engineer when we have none idle/spare (it constructs + captures).
@@ -215,13 +226,13 @@ export class AIController {
     }
     manageMilitary(p) {
         const army = this.army();
-        const enemyCC = this.world.entities.find((e) => e.owner !== this.owner && e.owner !== NEUTRAL && e.type === "command_center" && !e.dead);
+        const enemyCC = this.world.entities.find((e) => this.isEnemyOwner(e.owner) && e.type === "command_center" && !e.dead);
         if (!enemyCC)
             return;
         // defend: if enemy near our CC, rally army home
         const cc = this.cc();
         if (cc) {
-            const threat = this.world.entities.find((e) => e.owner !== this.owner && e.owner !== NEUTRAL && e.kind === "unit" && !e.dead && this.world.dist(e.pos, cc.pos) < 12);
+            const threat = this.world.entities.find((e) => this.isEnemyOwner(e.owner) && e.kind === "unit" && !e.dead && this.world.dist(e.pos, cc.pos) < 12);
             if (threat) {
                 const ids = army.map((a) => a.id);
                 if (ids.length)
@@ -254,7 +265,7 @@ export class AIController {
         let best;
         let bd = 1e9;
         for (const e of this.world.entities) {
-            if (e.owner === this.owner || e.owner === NEUTRAL || e.dead || e.kind !== "unit")
+            if (!this.isEnemyOwner(e.owner) || e.dead || e.kind !== "unit")
                 continue;
             const d = this.world.dist(e.pos, hero.pos);
             if (d < bd) {
@@ -287,8 +298,8 @@ export class AIController {
         if (!cc)
             return;
         const farLimit = this.world.map.w * 0.6;
-        const derricks = this.world.entities.filter((e) => e.type === "oil_derrick" && e.owner !== this.owner && !e.dead);
-        const outposts = this.world.entities.filter((e) => e.type === "outpost" && e.owner !== this.owner && !e.dead);
+        const derricks = this.world.entities.filter((e) => e.type === "oil_derrick" && (e.owner === NEUTRAL || this.isEnemyOwner(e.owner)) && !e.dead);
+        const outposts = this.world.entities.filter((e) => e.type === "outpost" && (e.owner === NEUTRAL || this.isEnemyOwner(e.owner)) && !e.dead);
         // T32: EARLY economy boost — grab the nearest neutral oil derrick with the idle hero (presence
         // capture; a derrick pays +1 silver / 5 s, which meaningfully accelerates the tech chain). Only
         // when we own no derrick yet and it isn't suicidally far across the map.

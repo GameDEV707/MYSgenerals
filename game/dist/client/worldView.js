@@ -72,6 +72,29 @@ export class WorldView {
         this.send = send;
         this.blocked = new Uint8Array(map.w * map.h);
     }
+    // Custom-team co-op: an owner is an ALLY if it is me, or a player on my side (same team >= 0).
+    // In classic (team < 0) this is true only for myself, so all team-aware control collapses to the
+    // original "own units only" behaviour with zero change.
+    isAlly(owner) {
+        if (owner === this.me)
+            return true;
+        const mine = this.players[this.me]?.team;
+        const other = this.players[owner]?.team;
+        return mine !== undefined && mine >= 0 && other === mine;
+    }
+    // The team's shared "home" owner — the ally that holds a Command Center (the base owner). New
+    // buildings a teammate places are charged to / owned by this player so the side shares one economy
+    // and one base. Falls back to me when no ally CC is visible (e.g. classic, or base lost).
+    economyOwner() {
+        let best = -1;
+        for (const e of this.entities) {
+            if (e.dead || e.type !== "command_center" || !this.isAlly(e.owner))
+                continue;
+            if (best < 0 || e.owner < best)
+                best = e.owner;
+        }
+        return best >= 0 ? best : this.me;
+    }
     ingest(snap) {
         // detect damage (hp drop) on the authoritative set to trigger hit flashes
         for (const e of snap.entities) {
@@ -226,6 +249,9 @@ export class WorldView {
             pv.color = ps.color;
             pv.defeated = ps.defeated;
             pv.team = ps.team ?? -1;
+            // Ally hero level is broadcast (not secret) so the selection box can label a teammate's hero.
+            if (ps.heroLevel !== undefined)
+                pv.heroLevel = ps.heroLevel;
             if (ps.id === snap.you) {
                 pv.silver = ps.silver;
                 pv.iron = ps.iron;
@@ -270,7 +296,7 @@ export class WorldView {
                     if (tx >= 0 && ty >= 0 && tx < m.w && ty < m.h)
                         this.blocked[ty * m.w + tx] = 1;
                 }
-            if (e.owner === this.me && (isBuilding || isOutpost) && Math.hypot(e.pos.x - (x + 0.5), e.pos.y - (y + 0.5)) <= 8 + e.radius)
+            if (this.isAlly(e.owner) && (isBuilding || isOutpost) && Math.hypot(e.pos.x - (x + 0.5), e.pos.y - (y + 0.5)) <= 8 + e.radius)
                 nearOwn = true;
         }
         const fp = BUILDING_DEFS[building].footprint, half = Math.floor(fp / 2);

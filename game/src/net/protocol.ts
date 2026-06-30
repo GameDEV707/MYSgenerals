@@ -32,7 +32,7 @@ export interface EntitySnap {
   r: number;            // radius (tiles)
   vis: number;          // vision radius (tiles) — used by the recipient to compute own fog
   rank: number;
-  fl: number;           // bit flags: 1 constructing, 2 mining, 4 isVehicle, 8 hasWeapon, 16 hero, 32 stub(last-known)
+  fl: number;           // bit flags: 1 constructing, 2 mining, 4 isVehicle, 8 hasWeapon, 16 hero, 32 stub(last-known), 64 busy(own: builder building / support healing)
   bp?: number;          // build progress 0..1 (constructing)
   cp?: number;          // capture progress 0..1 (neutral)
   co?: number;          // capture owner (neutral, contesting color)
@@ -50,7 +50,7 @@ export interface EntitySnap {
 }
 
 export const FL = {
-  constructing: 1, mining: 2, vehicle: 4, weapon: 8, hero: 16, stub: 32,
+  constructing: 1, mining: 2, vehicle: 4, weapon: 8, hero: 16, stub: 32, busy: 64,
 } as const;
 
 export interface PlayerSnap {

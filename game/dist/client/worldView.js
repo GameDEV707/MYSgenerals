@@ -18,6 +18,7 @@ export class ViewEntity {
         this.mining = false;
         this.isVehicle = false;
         this.hasWeapon = false;
+        this.busy = false; // T34: own builder engineer is constructing / own support unit is healing
         this.hero = null;
         this.stub = false; // last-known building (drawn dimmed)
         this.buildProgress = 0;
@@ -195,6 +196,7 @@ export class WorldView {
         ve.mining = (es.fl & FL.mining) !== 0;
         ve.isVehicle = (es.fl & FL.vehicle) !== 0;
         ve.hasWeapon = (es.fl & FL.weapon) !== 0;
+        ve.busy = (es.fl & FL.busy) !== 0;
         ve.stub = (es.fl & FL.stub) !== 0;
         ve.buildProgress = es.bp ?? (ve.constructing ? 0 : 1);
         ve.captureProgress = es.cp ?? 0;

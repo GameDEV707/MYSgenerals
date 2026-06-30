@@ -132,6 +132,11 @@ select, input {
 .power .fill { height: 100%; background: var(--power-ok); transition: width .25s, background .25s; }
 .power.deficit .fill { background: var(--power-bad); }
 .power.low .fill { background: #ffb020; }
+/* T34: builder / repair / medic unit counters next to the power widget — show "total / free". */
+.unitcount { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.unitcount .ic { font-size: 14px; line-height: 1; }
+.unitcount .val { font-weight: 700; font-size: 14px; color: var(--text); }
+.unitcount.repair .ic { filter: hue-rotate(180deg); }
 .timer { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .topbar .btn { padding: 6px 12px; font-size: 13px; }
 

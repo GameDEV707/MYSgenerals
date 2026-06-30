@@ -61,6 +61,9 @@ export class HUD {
         <div class="res iron"><span class="dot iron"></span><span class="val" data-id="r-iron">0</span></div>
         <div class="res gold"><span class="dot gold"></span><span class="val" data-id="r-gold">0</span></div>
         <div class="power" data-id="power"><span>⚡</span><div class="bar"><div class="fill" data-id="power-fill"></div></div><span class="rate" data-id="power-txt"></span></div>
+        <div class="unitcount builder" data-id="uc-builder" title="${t("hud.cntBuilder")}"><span class="ic">🔧</span><span class="val" data-id="cnt-builder">0/0</span></div>
+        <div class="unitcount repair" data-id="uc-repair" title="${t("hud.cntRepair")}"><span class="ic">🛠</span><span class="val" data-id="cnt-repair">0/0</span></div>
+        <div class="unitcount medic" data-id="uc-medic" title="${t("hud.cntMedic")}"><span class="ic">✚</span><span class="val" data-id="cnt-medic">0/0</span></div>
         <span class="timer" data-id="timer">0:00</span>
         <button class="btn" data-id="btn-edit" title="${t("hud.customize")}">✥</button>
         <button class="btn" data-id="btn-pause">☰</button>
@@ -113,6 +116,11 @@ export class HUD {
         const cb = this.q("cancelbuild-btn");
         if (cb)
             cb.textContent = `✕ ${t("cmd.cancelBuild")}`;
+        const tip = (id, key) => { const e = this.q(id); if (e)
+            e.title = t(key); };
+        tip("uc-builder", "hud.cntBuilder");
+        tip("uc-repair", "hud.cntRepair");
+        tip("uc-medic", "hud.cntMedic");
     }
     update(_dt) {
         const p = this.me();
@@ -140,6 +148,11 @@ export class HUD {
         }
         const mins = Math.floor(this.world.time / 60), secs = Math.floor(this.world.time % 60);
         this.setText("timer", `${mins}:${secs.toString().padStart(2, "0")}`);
+        // T34: top-bar unit counters, shown after the power widget. For each support/builder unit type
+        // owned by this player show "total / free", where "free" = not currently busy (a builder engineer
+        // not constructing a building; a Repair Engineer / Medic not currently servicing a patient). The
+        // busy state is carried per-entity in the snapshot (FL.busy).
+        this.updateUnitCounts();
         // T29 Part A: hide the map-covering panels (command/selection/hero) while positioning a building
         // so the battlefield is unobstructed; show the Cancel-build control. Per-HUD-instance (this reads
         // THIS side's renderer), so a split-screen player entering placement never blanks the other side.
@@ -154,6 +167,34 @@ export class HUD {
     }
     setText(id, v) { const e = this.q(id); if (e)
         e.textContent = String(v); }
+    // T34: count this player's builder engineers, repair engineers and medics and show "total / free"
+    // (free = not busy) next to the power widget. Counts read from the fog-safe client view (own units).
+    updateUnitCounts() {
+        const me = this.world.me;
+        let bT = 0, bF = 0, rT = 0, rF = 0, mT = 0, mF = 0;
+        for (const e of this.world.entities) {
+            if (e.owner !== me || e.kind !== "unit")
+                continue;
+            if (e.type === "engineer") {
+                bT++;
+                if (!e.busy)
+                    bF++;
+            }
+            else if (e.type === "repair_engineer") {
+                rT++;
+                if (!e.busy)
+                    rF++;
+            }
+            else if (e.type === "medic") {
+                mT++;
+                if (!e.busy)
+                    mF++;
+            }
+        }
+        this.setText("cnt-builder", `${bT}/${bF}`);
+        this.setText("cnt-repair", `${rT}/${rF}`);
+        this.setText("cnt-medic", `${mT}/${mF}`);
+    }
     selectedEntities() {
         const out = [];
         for (const id of this.r.selection) {

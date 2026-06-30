@@ -6,7 +6,7 @@
 // (single-player / split-screen via LoopbackTransport) and in Node (LAN via SocketTransport).
 import { NEUTRAL } from "../sim/world.js";
 import { AIController } from "../sim/ai.js";
-import { BUILDING_DEFS } from "../data.js";
+import { BUILDING_DEFS, UNIT_DEFS } from "../data.js";
 import { TICK_DT, mineEta, mineSlotCap } from "../constants.js";
 import { FL, } from "../net/protocol.js";
 const CMD_RATE_CAP = 40; // max accepted commands per player per tick (spec §20.5)
@@ -278,6 +278,12 @@ export class MatchHost {
             }
             if (e.researching)
                 s.rs = { id: e.researching.id, progress: e.researching.progress, time: e.researching.time };
+            // T34: mark a busy support/builder unit so the HUD can show "total / free" counts. A builder
+            // ENGINEER is busy while it has a buildTask (constructing a building); a support unit (Repair
+            // Engineer / Medic) is busy while it has a heal target. Own-entity only (never leaked).
+            if (e.kind === "unit" && ((e.type === "engineer" && !!e.buildTask) || (UNIT_DEFS[e.type]?.heal && e.healTargetId != null))) {
+                s.fl |= FL.busy;
+            }
             // T30: the building's level (CC / defensive tower) and any in-progress timed level upgrade,
             // so the HUD can show the level pip, the grown range ring, and the upgrade progress bar.
             if (e.isBuilding && e.level > 1)

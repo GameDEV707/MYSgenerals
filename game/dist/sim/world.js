@@ -225,6 +225,12 @@ export class World {
                     const e = this.byId.get(id);
                     if (!e || e.kind !== "unit" || e.dead)
                         continue;
+                    // T34: support units (Medic / Repair Engineer) never leave the buildable boundary. They
+                    // ignore any move / attack-move order whose destination lies OUTSIDE it — so selecting the
+                    // whole army and sending it to battle leaves them at home, healing. A move to a point still
+                    // inside the boundary is honoured (the player can reposition them within the base).
+                    if (this.isSupport(e) && !this.insideBuildBoundary(e.owner, { x: cmd.x, y: cmd.y }))
+                        continue;
                     e.target = null;
                     e.captureTask = null;
                     e.mining = false;
@@ -247,6 +253,8 @@ export class World {
                     const e = this.byId.get(id);
                     if (!e || e.kind !== "unit" || e.dead)
                         continue;
+                    if (this.isSupport(e))
+                        continue; // T34: support units don't go to battle — never attack
                     e.target = cmd.target;
                     e.stance = "aggressive";
                     e.captureTask = null;
@@ -467,6 +475,24 @@ export class World {
             }
         }
         return best;
+    }
+    // T34: a SUPPORT unit (Repair Engineer / Medic) — it carries an auto heal/repair ability, never
+    // fights, and is confined to the base's buildable boundary (see insideBuildBoundary).
+    isSupport(e) { return e.kind === "unit" && !!UNIT_DEFS[e.type].heal; }
+    // T34: the "buildable boundary" — the area within BUILD_RADIUS of any of the owner's buildings (or
+    // an owned outpost sub-base). This mirrors the `near` test in placementValid (i.e. exactly where
+    // the player may place buildings). Support units stay inside it and only service allies inside it.
+    insideBuildBoundary(owner, pos) {
+        return this.entities.some((e) => !e.dead && e.owner === owner && (e.kind === "building" || e.type === "outpost") && this.dist(e.pos, pos) <= BUILD_RADIUS + e.radius);
+    }
+    // Where a strayed support unit retreats to to get back inside the boundary — the Command Center,
+    // or failing that any owned building / outpost.
+    supportHome(owner) {
+        const cc = this.ownerCC(owner);
+        if (cc)
+            return cc.pos;
+        const b = this.entities.find((e) => !e.dead && e.owner === owner && (e.kind === "building" || e.type === "outpost"));
+        return b ? b.pos : undefined;
     }
     tryTrain(cmd) {
         const b = this.byId.get(cmd.building);
@@ -820,11 +846,26 @@ export class World {
             if (e.kind !== "building" || e.dead)
                 continue;
             if (e.constructing) {
-                // progress while a builder is near OR fallback slow rate to avoid stalls
+                // T34: ONE engineer builds ONE building. A building advances ONLY while its assigned
+                // engineer-builder is actually working at the site — there is NO fallback auto-progress, so
+                // a lone engineer must finish one building before the next can rise. If a constructing
+                // building has NO assigned builder (its engineer died, or none was free when it was placed),
+                // dispatch the nearest idle engineer to it; otherwise it simply waits its turn.
                 const builderNear = this.entities.some((m) => m.type === "engineer" && m.owner === e.owner && !m.dead && m.buildTask && m.buildTask.entId === e.id && this.dist(m.pos, e.pos) < e.radius + 1.5);
-                const rate = builderNear ? 1 : 0.5;
-                e.buildProgress += (TICK_DT / e.buildTotal) * rate;
-                e.hp = Math.min(e.maxHp, e.maxHp * (0.1 + 0.9 * e.buildProgress));
+                if (builderNear) {
+                    e.buildProgress += (TICK_DT / e.buildTotal);
+                    e.hp = Math.min(e.maxHp, e.maxHp * (0.1 + 0.9 * e.buildProgress));
+                }
+                else {
+                    const assigned = this.entities.some((m) => m.type === "engineer" && m.owner === e.owner && !m.dead && m.buildTask && m.buildTask.entId === e.id);
+                    if (!assigned) {
+                        const builder = this.nearestIdleWorker(e.owner, e.pos);
+                        if (builder) {
+                            builder.buildTask = { bid: e.type, pos: { ...e.pos }, entId: e.id };
+                            this.setMove(builder, e.pos.x, e.pos.y);
+                        }
+                    }
+                }
                 if (e.buildProgress >= 1) {
                     e.constructing = false;
                     e.buildProgress = 1;
@@ -1076,14 +1117,24 @@ export class World {
                 continue;
             if (e.healFxCd > 0)
                 e.healFxCd -= TICK_DT;
-            // validate / drop the current target
+            // T34: a support unit is leashed to the buildable boundary. If it has strayed outside (chased a
+            // patient out, got pushed, or its base shrank), drop the patient and walk back inside before
+            // doing anything else — it only heals/repairs allies that have returned inside the boundary.
+            if (!this.insideBuildBoundary(e.owner, e.pos)) {
+                e.healTargetId = null;
+                const home = this.supportHome(e.owner);
+                if (home && e.path.length === 0 && e.moveTarget == null)
+                    this.setMove(e, home.x, home.y);
+                continue;
+            }
+            // validate / drop the current target (it must still be serviceable AND inside the boundary)
             let tgt = e.healTargetId != null ? this.byId.get(e.healTargetId) : undefined;
-            if (tgt && !this.healable(heal.targets, e, tgt)) {
+            if (tgt && (!this.healable(heal.targets, e, tgt) || !this.insideBuildBoundary(e.owner, tgt.pos))) {
                 tgt = undefined;
                 e.healTargetId = null;
             }
             // no target → seek the nearest damaged serviceable ally within range (only while idle, so a
-            // player move/attack order isn't overridden).
+            // player move order isn't overridden).
             if (!tgt) {
                 if (e.path.length === 0 && e.moveTarget == null && e.stance !== "hold") {
                     const found = this.nearestHealTarget(e, heal);
@@ -1127,6 +1178,8 @@ export class World {
         for (const o of this.entities) {
             if (!this.healable(heal.targets, e, o))
                 continue;
+            if (!this.insideBuildBoundary(e.owner, o.pos))
+                continue; // T34: only patients inside the base boundary
             const d = this.dist(e.pos, o.pos);
             if (d <= bd) {
                 bd = d;

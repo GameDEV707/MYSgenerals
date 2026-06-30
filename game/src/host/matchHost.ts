@@ -6,8 +6,8 @@
 // (single-player / split-screen via LoopbackTransport) and in Node (LAN via SocketTransport).
 import { World, Command, GameEvent, NEUTRAL, Entity } from "../sim/world.js";
 import { AIController } from "../sim/ai.js";
-import { BUILDING_DEFS } from "../data.js";
-import { BuildingId } from "../types.js";
+import { BUILDING_DEFS, UNIT_DEFS } from "../data.js";
+import { BuildingId, UnitId } from "../types.js";
 import { TICK_DT, mineEta, mineSlotCap } from "../constants.js";
 import {
   Snapshot, EntitySnap, PlayerSnap, WireCommand, FL, BannerSnap, StrikeSnap,
@@ -235,6 +235,12 @@ export class MatchHost implements CommandSink {
       if (e.rally2) s.ral2 = [e.rally2.x, e.rally2.y];
       if (e.isBuilding && BUILDING_DEFS[e.type as BuildingId]?.produces) { s.bay = e.bays; s.spd = e.speedLevel; }
       if (e.researching) s.rs = { id: e.researching.id, progress: e.researching.progress, time: e.researching.time };
+      // T34: mark a busy support/builder unit so the HUD can show "total / free" counts. A builder
+      // ENGINEER is busy while it has a buildTask (constructing a building); a support unit (Repair
+      // Engineer / Medic) is busy while it has a heal target. Own-entity only (never leaked).
+      if (e.kind === "unit" && ((e.type === "engineer" && !!e.buildTask) || (UNIT_DEFS[e.type as UnitId]?.heal && e.healTargetId != null))) {
+        s.fl |= FL.busy;
+      }
       // T30: the building's level (CC / defensive tower) and any in-progress timed level upgrade,
       // so the HUD can show the level pip, the grown range ring, and the upgrade progress bar.
       if (e.isBuilding && e.level > 1) s.lvl = e.level;

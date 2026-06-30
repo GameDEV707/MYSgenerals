@@ -2,5 +2,5 @@
 // interpolate between buffered snapshots (spec §20.4).
 export const INTERP_DELAY_MS = 100;
 export const FL = {
-    constructing: 1, mining: 2, vehicle: 4, weapon: 8, hero: 16, stub: 32,
+    constructing: 1, mining: 2, vehicle: 4, weapon: 8, hero: 16, stub: 32, busy: 64,
 };

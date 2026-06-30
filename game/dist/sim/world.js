@@ -712,6 +712,7 @@ export class World {
         if (this.winner !== -2)
             return;
         this.time += TICK_DT;
+        this.updateNavField();
         this.applyCommands();
         this.economySystem();
         this.productionSystem();
@@ -784,13 +785,14 @@ export class World {
                 }
             }
             else if (e.type === "oil_derrick" && e.owner !== NEUTRAL) {
-                if (e.minerSlots > 0) {
-                    e.resAccum += TICK_DT / OIL_INTERVAL;
-                    while (e.resAccum >= 1) {
-                        e.resAccum -= 1;
-                        this.players[e.owner].silver += 1;
-                        this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" });
-                    }
+                // T33: a CAPTURED oil derrick is a passive income point — it pays out on its own once owned
+                // (no miner walks into it). Miners are no longer routed here (see isMineType), so its yield
+                // must not be gated on `minerSlots`.
+                e.resAccum += TICK_DT / OIL_INTERVAL;
+                while (e.resAccum >= 1) {
+                    e.resAccum -= 1;
+                    this.players[e.owner].silver += 1;
+                    this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" });
                 }
             }
         }
@@ -877,13 +879,17 @@ export class World {
                 continue;
             if (e.mineId != null) {
                 const mine = this.byId.get(e.mineId);
-                if (!mine || mine.dead) {
+                // Drop a stale/invalid claim (mine gone, no longer a mine, no longer ours, or still building)
+                // and look for a fresh one instead of freezing on it.
+                if (!mine || mine.dead || !isMineType(mine.type) || mine.owner !== e.owner || mine.constructing) {
                     e.mineId = null;
                     e.mining = false;
                     e.inMine = false;
+                    if (!mine || mine.dead)
+                        this.autoAssignMiner(e);
                     continue;
                 }
-                if (this.dist(e.pos, mine.pos) <= mine.radius + 1.2) {
+                if (this.adjacentToMine(e, mine)) {
                     if (!e.mining) {
                         const cur = this.countMiners(mine.id);
                         if (cur < mineSlotCap(mine.type)) {
@@ -931,6 +937,20 @@ export class World {
                 continue;
             e.minerSlots = Math.min(this.countMiners(e.id), mineSlotCap(e.type));
         }
+    }
+    // T33: a miner counts as "at" a mine when it stands on a tile ADJACENT to (or inside) the mine's
+    // footprint, measured in tile (Chebyshev) distance. The old check compared the euclidean distance
+    // to the mine CENTRE against a fixed threshold (radius + 1.2 ≈ 2.7) — but the only free tile a
+    // miner could reach is often a DIAGONAL neighbour of a 3×3 mine, whose centre sits ~2.83 tiles from
+    // the mine centre. That exceeded the threshold, so the miner halted one tile out and never entered
+    // ("standing beside the gold mine"). Footprint-aware tile adjacency fixes that for any mine size.
+    adjacentToMine(e, mine) {
+        const fp = mine.kind === "building" ? BUILDING_DEFS[mine.type].footprint : 3;
+        const half = Math.floor(fp / 2);
+        const ex = Math.floor(e.pos.x), ey = Math.floor(e.pos.y);
+        const mx = Math.floor(mine.pos.x), my = Math.floor(mine.pos.y);
+        const cheb = Math.max(Math.abs(ex - mx), Math.abs(ey - my));
+        return cheb <= half + 1;
     }
     countMiners(mineId) {
         let n = 0;
@@ -995,6 +1015,23 @@ export class World {
         }
     }
     // ---------- movement (spec §8.5) ----------
+    // T33: rebuild the navigation SOFT-COST layer from the live unit positions. A STATIONARY unit (one
+    // not currently following a path, e.g. holding position, idling, or arrived) stamps a traversal
+    // penalty on its tile so other units PATH AROUND it instead of marching straight into it and then
+    // shoving each other (the "soldiers jam on the road and can't get through" bug). Moving units are
+    // left out (they clear the lane themselves), and the penalty is soft so a unit can still squeeze
+    // through a fully-occupied chokepoint when there is genuinely no detour.
+    updateNavField() {
+        this.grid.clearSoftCost();
+        const PENALTY = 4;
+        for (const e of this.entities) {
+            if (e.kind !== "unit" || e.dead || e.inMine)
+                continue;
+            if (e.path.length > 0)
+                continue; // a moving unit is not a standing obstacle
+            this.grid.addSoftCost(Math.floor(e.pos.x), Math.floor(e.pos.y), PENALTY);
+        }
+    }
     movementSystem() {
         for (const e of this.entities) {
             if (e.kind !== "unit" || e.dead)

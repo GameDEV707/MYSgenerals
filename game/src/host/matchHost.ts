@@ -242,11 +242,16 @@ export class MatchHost implements CommandSink {
       // computed exactly like economySystem(); idle silver mine reports idle). Enemy mines never get
       // this (only the `mine` branch runs), so it stays fog-safe.
       if (!e.constructing) {
-        const eta = mineEta(e.type, e.resAccum, e.minerSlots);
+        // T33: the oil derrick pays out passively once captured (no miner inside), so report its
+        // occupancy as 1 when owned purely for the ETA readout — and mark it NOT `free`, so it never
+        // shows up in the Miner-assign panel (a miner can no longer be sent to a derrick).
+        const isOil = e.type === "oil_derrick";
+        const occ = isOil ? (e.owner !== NEUTRAL ? 1 : 0) : e.minerSlots;
+        const eta = mineEta(e.type, e.resAccum, occ);
         // T31: `free` means the mine still has a spare slot — no miner inside AND none walking to
         // claim it — so the HUD's Miner panel can list only genuinely-assignable mines and a
         // right-click won't send a miner to a mine that is taken (which would make it wander off).
-        if (eta) s.mn = { s: eta.seconds == null ? 0 : eta.seconds, p: eta.progress, res: eta.resource, idle: eta.idle, free: this.world.claimedMiners(e.id) < mineSlotCap(e.type) };
+        if (eta) s.mn = { s: eta.seconds == null ? 0 : eta.seconds, p: eta.progress, res: eta.resource, idle: eta.idle, free: !isOil && this.world.claimedMiners(e.id) < mineSlotCap(e.type) };
       }
       if (e.hero) s.hero = { mana: e.hero.mana, maxMana: e.hero.maxMana, ab: e.hero.abilities.map((a) => ({ rank: a.rank, cd: Math.max(0, a.cdUntil - this.world.time) })) };
     }

@@ -6,11 +6,17 @@ export class NavGrid {
   h: number;
   blocked: Uint8Array; // 1 = impassable (cliff / building / wall)
   terrain: Uint8Array;  // 0 grass, 1 cliff, 2 water, 3 road
+  // T33: a per-tick SOFT traversal penalty layer (not a hard block) marking tiles where standing
+  // units sit. A* adds this to the step cost, so paths bend AROUND clumps of stationary units when a
+  // reasonable detour exists, yet a tile is never fully sealed (units can still squeeze through if
+  // that is the only way). Rebuilt every tick from the live unit positions; 0 = clear.
+  softCost: Uint16Array;
 
   constructor(w: number, h: number) {
     this.w = w; this.h = h;
     this.blocked = new Uint8Array(w * h);
     this.terrain = new Uint8Array(w * h);
+    this.softCost = new Uint16Array(w * h);
   }
   idx(x: number, y: number): number { return y * this.w + x; }
   inBounds(x: number, y: number): boolean { return x >= 0 && y >= 0 && x < this.w && y < this.h; }
@@ -20,6 +26,14 @@ export class NavGrid {
   }
   setBlocked(x: number, y: number, v: boolean): void {
     if (this.inBounds(x, y)) this.blocked[this.idx(x, y)] = v ? 1 : 0;
+  }
+  // T33: clear the soft-cost layer (called once per tick before it is repopulated).
+  clearSoftCost(): void { this.softCost.fill(0); }
+  // Add a soft traversal penalty at a tile (saturating, capped to the Uint16 range).
+  addSoftCost(x: number, y: number, c: number): void {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    this.softCost[i] = Math.min(65535, this.softCost[i] + c);
   }
 }
 
@@ -61,8 +75,10 @@ export function findPath(grid: NavGrid, sx: number, sy: number, tx: number, ty: 
         if (grid.isBlocked(cur.x + dx, cur.y) && grid.isBlocked(cur.x, cur.y + dy)) continue;
       }
       const step = (dx !== 0 && dy !== 0) ? 1.4142 : 1;
-      const ng = cur.g + step;
       const id = grid.idx(nx, ny);
+      // T33: add the destination tile's SOFT penalty (standing units) to the step cost so the path
+      // prefers to route around stationary unit clusters while still allowing passage when needed.
+      const ng = cur.g + step + grid.softCost[id];
       if (gScore.has(id) && ng >= (gScore.get(id) as number)) continue;
       gScore.set(id, ng);
       const node: Node = { x: nx, y: ny, g: ng, f: ng + heur(nx, ny, tx, ty), parent: cur };

@@ -4,6 +4,7 @@ export class NavGrid {
         this.h = h;
         this.blocked = new Uint8Array(w * h);
         this.terrain = new Uint8Array(w * h);
+        this.softCost = new Uint16Array(w * h);
     }
     idx(x, y) { return y * this.w + x; }
     inBounds(x, y) { return x >= 0 && y >= 0 && x < this.w && y < this.h; }
@@ -15,6 +16,15 @@ export class NavGrid {
     setBlocked(x, y, v) {
         if (this.inBounds(x, y))
             this.blocked[this.idx(x, y)] = v ? 1 : 0;
+    }
+    // T33: clear the soft-cost layer (called once per tick before it is repopulated).
+    clearSoftCost() { this.softCost.fill(0); }
+    // Add a soft traversal penalty at a tile (saturating, capped to the Uint16 range).
+    addSoftCost(x, y, c) {
+        if (!this.inBounds(x, y))
+            return;
+        const i = this.idx(x, y);
+        this.softCost[i] = Math.min(65535, this.softCost[i] + c);
     }
 }
 // A* returning a list of tile-center waypoints (in tile coordinates).
@@ -63,8 +73,10 @@ export function findPath(grid, sx, sy, tx, ty, maxNodes = 4000) {
                     continue;
             }
             const step = (dx !== 0 && dy !== 0) ? 1.4142 : 1;
-            const ng = cur.g + step;
             const id = grid.idx(nx, ny);
+            // T33: add the destination tile's SOFT penalty (standing units) to the step cost so the path
+            // prefers to route around stationary unit clusters while still allowing passage when needed.
+            const ng = cur.g + step + grid.softCost[id];
             if (gScore.has(id) && ng >= gScore.get(id))
                 continue;
             gScore.set(id, ng);

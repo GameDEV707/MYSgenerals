@@ -107,8 +107,13 @@ export function upgradeTime(buildTime: number): number { return Math.max(1, Math
 export function mineSlotCap(_type: string): number {
   return 1;
 }
+// A MINEABLE building — one a Miner walks into to extract a resource. NOTE: the oil derrick is
+// deliberately NOT a mine: it is a CAPTURED income point (taken by presence / an Engineer channel)
+// that pays out passively, so a Miner must never treat it as a mine to walk into (that was a bug —
+// miners trekked to captured oil derricks as if they were gold mines). `mineSlotCap`/`mineEta` still
+// accept "oil_derrick" for HUD readouts, but miner targeting goes exclusively through isMineType().
 export function isMineType(type: string): boolean {
-  return type === "silver_mine" || type === "iron_mine" || type === "gold_mine" || type === "oil_derrick";
+  return type === "silver_mine" || type === "iron_mine" || type === "gold_mine";
 }
 
 // ---- T29: resource-mine extraction ETA (pure; shared by the host snapshot + the headless test) ----

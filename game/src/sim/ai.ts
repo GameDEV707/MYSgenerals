@@ -56,10 +56,11 @@ export class AIController {
     } else if (cc && engineers.length < 2 && !idleEngineer && cc.queue.length === 0 && p.silver >= 40) {
       this.world.issue({ t: "train", building: cc.id, unit: "engineer" }); // a second builder when the first is busy
     }
-    // T31: keep mines staffed — ONE miner per mine (every type holds a single miner).
+    // T31: keep mines staffed — ONE miner per mine (silver/iron/gold each hold a single miner). The
+    // oil derrick is captured income (no miner inside), so it is NOT counted as a miner slot here.
     const miners = this.ownedAny("miner").length;
     const slots = this.owned("silver_mine").length + this.owned("iron_mine").length
-      + this.owned("gold_mine").length + this.ownedAny("oil_derrick").filter((e) => e.owner === this.owner).length;
+      + this.owned("gold_mine").length;
     if (cc && miners < slots + 1 && cc.queue.length === 0 && p.silver >= 5) {
       this.world.issue({ t: "train", building: cc.id, unit: "miner" });
     }

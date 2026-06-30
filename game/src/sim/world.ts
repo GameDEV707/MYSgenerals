@@ -62,6 +62,7 @@ export class Entity {
   isWorker = false; isVehicle = false;
   mineId: number | null = null; mining = false;
   mineRetry = 0; // T32 D1: consecutive failed attempts to reach an assigned mine (stuck recovery)
+  buildRetry = 0; // consecutive ticks an assigned engineer-builder has idled SHORT of its build site (stuck recovery)
   buildTask: { bid: BuildingId; pos: Vec2; entId: number } | null = null;
   captureTask: { target: number } | null = null;
   // support units (Repair Engineer / Medic): the ally currently being serviced (null = seeking).
@@ -178,6 +179,15 @@ export type GameEvent =
 const RANK_DMG = [1, 1.1, 1.2, 1.3];
 const RANK_HP = [1, 1.1, 1.2, 1.3];
 const RANK_RANGE = [0, 0, 1, 1];
+
+// Support-unit (Medic / Repair Engineer) combat behaviour tuning.
+// SUPPORT_DANGER_R: an ARMED enemy within this many tiles of a spot means a battle is still raging
+//   there — a support unit will NOT advance into it (it waits / falls back until the area is quiet).
+// SUPPORT_REAR_R: a support unit that is idle (no safe patient) pulls back toward its "home" (the
+//   Command Center) and is considered safely in the rear once within this distance, so it stops there
+//   instead of crowding the base centre.
+const SUPPORT_DANGER_R = 9;
+const SUPPORT_REAR_R = 4;
 
 // Hero ability tuning (spec §9.3). Index 0=Q,1=W,2=E,3=R.
 const ABIL = {
@@ -534,6 +544,42 @@ export class World {
     return best;
   }
 
+  // Footprint-aware "is this engineer at the build site?" — true when it stands on a tile adjacent
+  // to (or inside) the building's NxN footprint, measured in tile (Chebyshev) distance. Mirrors
+  // adjacentToMine: the centre tile is occupied by the rising structure, so the closest tile the
+  // engineer can actually reach is a footprint neighbour, which a tight centre-distance test misses.
+  private atBuildSite(e: Entity, b: Entity): boolean {
+    const fp = b.kind === "building" ? BUILDING_DEFS[b.type as BuildingId].footprint : 3;
+    const half = Math.floor(fp / 2);
+    const ex = Math.floor(e.pos.x), ey = Math.floor(e.pos.y);
+    const bx = Math.floor(b.pos.x), by = Math.floor(b.pos.y);
+    const cheb = Math.max(Math.abs(ex - bx), Math.abs(ey - by));
+    return cheb <= half + 1;
+  }
+
+  // A guaranteed-free tile on the ring just outside a building's footprint — the spot an engineer
+  // should stand on to work. Returns the nearest free ring tile (falling back to nearestFree of the
+  // centre, then the building centre). Used by the build stuck-recovery to re-route a stalled builder.
+  private freeApproachTile(b: Entity): Vec2 | undefined {
+    const fp = b.kind === "building" ? BUILDING_DEFS[b.type as BuildingId].footprint : 3;
+    const half = Math.floor(fp / 2);
+    const bx = Math.floor(b.pos.x), by = Math.floor(b.pos.y);
+    const lo = -half - 1, hi = fp - half; // ring one tile outside the footprint
+    let best: Vec2 | undefined; let bd = 1e9;
+    for (let dy = lo; dy <= hi; dy++) {
+      for (let dx = lo; dx <= hi; dx++) {
+        if (dx !== lo && dx !== hi && dy !== lo && dy !== hi) continue; // ring only
+        const tx = bx + dx, ty = by + dy;
+        if (this.grid.isBlocked(tx, ty)) continue;
+        const d = Math.hypot(dx, dy);
+        if (d < bd) { bd = d; best = { x: tx, y: ty }; }
+      }
+    }
+    if (best) return best;
+    const nf = nearestFree(this.grid, bx, by);
+    return nf ? { x: nf.x, y: nf.y } : { x: b.pos.x, y: b.pos.y };
+  }
+
   // T34: a SUPPORT unit (Repair Engineer / Medic) — it carries an auto heal/repair ability, never
   // fights, and is confined to the base's buildable boundary (see insideBuildBoundary).
   isSupport(e: Entity): boolean { return e.kind === "unit" && !!UNIT_DEFS[e.type as UnitId].heal; }
@@ -791,22 +837,34 @@ export class World {
         // a lone engineer must finish one building before the next can rise. If a constructing
         // building has NO assigned builder (its engineer died, or none was free when it was placed),
         // dispatch the nearest idle engineer to it; otherwise it simply waits its turn.
-        const builderNear = this.entities.some((m) => m.type === "engineer" && m.owner === e.owner && !m.dead && m.buildTask && m.buildTask.entId === e.id && this.dist(m.pos, e.pos) < e.radius + 1.5);
+        const builder = this.entities.find((m) => m.type === "engineer" && m.owner === e.owner && !m.dead && m.buildTask && m.buildTask.entId === e.id);
+        // "At the site" = within the old euclidean tolerance OR standing on a tile adjacent to the
+        // footprint (footprint-aware, like the miner's adjacentToMine). The latter is what fixes the
+        // "engineer freezes one tile beside the thing it should build" bug: the build target tile is
+        // occupied by the rising structure, so A* can only stop on a free neighbour, which for a 3×3/4×4
+        // footprint sits beyond a tight centre-distance check.
+        const builderNear = !!builder && (this.dist(builder.pos, e.pos) < e.radius + 1.5 || this.atBuildSite(builder, e));
         if (builderNear) {
           e.buildProgress += (TICK_DT / e.buildTotal);
           e.hp = Math.min(e.maxHp, e.maxHp * (0.1 + 0.9 * e.buildProgress));
-        } else {
-          const assigned = this.entities.some((m) => m.type === "engineer" && m.owner === e.owner && !m.dead && m.buildTask && m.buildTask.entId === e.id);
-          if (!assigned) {
-            const builder = this.nearestIdleWorker(e.owner, e.pos);
-            if (builder) { builder.buildTask = { bid: e.type as BuildingId, pos: { ...e.pos }, entId: e.id }; this.setMove(builder, e.pos.x, e.pos.y); }
-          }
+          if (builder) builder.buildRetry = 0;
+        } else if (!builder) {
+          const nb = this.nearestIdleWorker(e.owner, e.pos);
+          if (nb) { nb.buildTask = { bid: e.type as BuildingId, pos: { ...e.pos }, entId: e.id }; this.setMove(nb, e.pos.x, e.pos.y); }
+        } else if (builder.path.length === 0 && builder.moveTarget == null) {
+          // The assigned builder has an empty path but is NOT yet at the site — it idled short (its
+          // path ended on a far free tile, it was shoved out by separation, or no path existed at
+          // dispatch). Re-route it onto a guaranteed-free tile right beside the footprint so it
+          // closes the final gap instead of standing there forever (mirrors the miner stuck-recovery).
+          builder.buildRetry++;
+          const spot = this.freeApproachTile(e);
+          if (spot) this.setMove(builder, spot.x, spot.y);
         }
         if (e.buildProgress >= 1) {
           e.constructing = false; e.buildProgress = 1; e.hp = e.maxHp;
           this.events.push({ e: "toast", key: "toast.buildComplete", kind: "ok", to: e.owner });
           // T31: free the engineer-builder (it idles near the finished building, ready for the next job).
-          for (const m of this.entities) if (m.buildTask && m.buildTask.entId === e.id) { m.buildTask = null; m.moveTarget = null; m.path = []; }
+          for (const m of this.entities) if (m.buildTask && m.buildTask.entId === e.id) { m.buildTask = null; m.moveTarget = null; m.path = []; m.buildRetry = 0; }
         }
         continue;
       }
@@ -993,30 +1051,58 @@ export class World {
     return t.kind === "unit" && this.armorOf(t) === "InfantryLight" && !!t.weaponDef;
   }
 
+  // Is a battle still raging within `radius` tiles of `pos` (from `e`'s point of view)? True when any
+  // living, ARMED enemy (a unit/tower/outpost that carries a weapon) sits within range. Support units
+  // (Medic / Repair Engineer) use this to stay OUT of firefights: they never advance toward a spot
+  // while it is contested — they only tend the wounded once the area has fallen quiet.
+  private combatNear(e: Entity, pos: Vec2, radius: number): boolean {
+    for (const o of this.entities) {
+      if (o.dead || o.inMine) continue;
+      if (!o.weaponDef) continue;           // only things that can actually shoot create danger
+      if (!this.isEnemy(e, o)) continue;
+      if (this.dist(o.pos, pos) <= radius) return true;
+    }
+    return false;
+  }
+
   private healSystem(): void {
     for (const e of this.entities) {
       if (e.kind !== "unit" || e.dead) continue;
       const heal = UNIT_DEFS[e.type as UnitId].heal;
       if (!heal) continue;
       if (e.healFxCd > 0) e.healFxCd -= TICK_DT;
+      const home = this.supportHome(e.owner);
       // T34: a support unit is leashed to the buildable boundary. If it has strayed outside (chased a
       // patient out, got pushed, or its base shrank), drop the patient and walk back inside before
       // doing anything else — it only heals/repairs allies that have returned inside the boundary.
       if (!this.insideBuildBoundary(e.owner, e.pos)) {
         e.healTargetId = null;
-        const home = this.supportHome(e.owner);
         if (home && e.path.length === 0 && e.moveTarget == null) this.setMove(e, home.x, home.y);
         continue;
       }
-      // validate / drop the current target (it must still be serviceable AND inside the boundary)
+      // Combat avoidance: while fighting is happening near the support unit, it must NOT push forward
+      // to heal — it drops any patient and falls back toward the rear (its home / Command Center),
+      // waiting there until the battle stops. Only once the area is quiet again does it move up to the
+      // wounded. (Honours the player's "hold" stance: a held unit waits in place rather than retreating.)
+      if (this.combatNear(e, e.pos, SUPPORT_DANGER_R)) {
+        e.healTargetId = null;
+        if (home && e.stance !== "hold" && e.path.length === 0 && e.moveTarget == null && this.dist(e.pos, home) > SUPPORT_REAR_R) {
+          this.setMove(e, home.x, home.y);
+        }
+        continue;
+      }
+      // validate / drop the current target (it must still be serviceable, inside the boundary, AND
+      // not currently under fire — if a fresh fight breaks out around the patient, abandon it).
       let tgt = e.healTargetId != null ? this.byId.get(e.healTargetId) : undefined;
-      if (tgt && (!this.healable(heal.targets, e, tgt) || !this.insideBuildBoundary(e.owner, tgt.pos))) { tgt = undefined; e.healTargetId = null; }
-      // no target → seek the nearest damaged serviceable ally within range (only while idle, so a
-      // player move order isn't overridden).
+      if (tgt && (!this.healable(heal.targets, e, tgt) || !this.insideBuildBoundary(e.owner, tgt.pos) || this.combatNear(e, tgt.pos, SUPPORT_DANGER_R))) { tgt = undefined; e.healTargetId = null; }
+      // no target → seek the nearest damaged serviceable ally that is OUT of combat (only while idle,
+      // so a player move order isn't overridden). With no safe patient to tend, the support unit pulls
+      // back to the rear so it isn't loitering on the front line waiting for the next casualty.
       if (!tgt) {
         if (e.path.length === 0 && e.moveTarget == null && e.stance !== "hold") {
           const found = this.nearestHealTarget(e, heal);
           if (found) { e.healTargetId = found.id; this.setMove(e, found.pos.x, found.pos.y); }
+          else if (home && this.dist(e.pos, home) > SUPPORT_REAR_R) this.setMove(e, home.x, home.y);
         }
         continue;
       }
@@ -1036,7 +1122,7 @@ export class World {
         this.events.push({ e: "float", pos: { x: tgt.pos.x, y: tgt.pos.y - tgt.radius }, text: "+", color: heal.targets === "mechanical" ? "#7ad7ff" : "#34d399" });
         e.healFxCd = 0.25;
       }
-      if (tgt.hp >= tgt.maxHp) e.healTargetId = null; // fully restored → seek the next patient
+      if (tgt.hp >= tgt.maxHp) e.healTargetId = null; // fully restored → seek the next patient (or fall back to the rear)
     }
   }
 
@@ -1045,6 +1131,7 @@ export class World {
     for (const o of this.entities) {
       if (!this.healable(heal.targets, e, o)) continue;
       if (!this.insideBuildBoundary(e.owner, o.pos)) continue; // T34: only patients inside the base boundary
+      if (this.combatNear(e, o.pos, SUPPORT_DANGER_R)) continue; // don't run into a firefight — wait for it to end
       const d = this.dist(e.pos, o.pos);
       if (d <= bd) { bd = d; best = o; }
     }

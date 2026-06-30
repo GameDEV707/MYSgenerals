@@ -232,6 +232,7 @@ export class MatchHost implements CommandSink {
     if (mine) {
       if (e.queue.length) s.q = e.queue.map((q) => ({ unit: q.unit, progress: q.progress, time: q.time }));
       if (e.rally) s.ral = [e.rally.x, e.rally.y];
+      if (e.rally2) s.ral2 = [e.rally2.x, e.rally2.y];
       if (e.isBuilding && BUILDING_DEFS[e.type as BuildingId]?.produces) { s.bay = e.bays; s.spd = e.speedLevel; }
       if (e.researching) s.rs = { id: e.researching.id, progress: e.researching.progress, time: e.researching.time };
       // T30: the building's level (CC / defensive tower) and any in-progress timed level upgrade,

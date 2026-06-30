@@ -429,10 +429,14 @@ export class Renderer {
         if (this.selection.has(e.id) && e.type === "radar" && !e.constructing) {
             this.drawRangeRing(this.toX(e.pos.x), this.toY(e.pos.y), e.vision * z, "rgba(120,200,255,0.45)");
         }
-        // Rally "flag": for a selected OWN building with a rally point, draw a flag at the point and a
-        // dashed guide line from the building to it (HQ workers / produced units gather there).
-        if (e.owner === this.world.me && this.selection.has(e.id) && e.rally) {
-            this.drawRallyFlag(e.rally.x, e.rally.y, e.pos.x, e.pos.y);
+        // Rally "flag(s)": for a selected OWN building, draw a flag at each rally point and a dashed
+        // guide line from the building. The Command Center has two — a Miner flag (green) and an
+        // Engineer flag (cyan); other producers have one general flag (green).
+        if (e.owner === this.world.me && this.selection.has(e.id)) {
+            if (e.rally)
+                this.drawRallyFlag(e.rally.x, e.rally.y, e.pos.x, e.pos.y, "#34d399");
+            if (e.rally2)
+                this.drawRallyFlag(e.rally2.x, e.rally2.y, e.pos.x, e.pos.y, "#38bdf8");
         }
         // T30: building level pip (L2 / L3) for upgraded Command Centers and towers (own info).
         if (e.level > 1) {
@@ -933,11 +937,12 @@ export class Renderer {
         ctx.fill();
     }
     // Rally "flag" marker drawn in world space: a dashed guide line from the building to the rally
-    // point, then a small pole + team-coloured pennant at the point.
-    drawRallyFlag(rx, ry, bx, by) {
+    // point, then a small pole + coloured pennant at the point.
+    drawRallyFlag(rx, ry, bx, by, color) {
         const ctx = this.ctx, z = this.cam.zoom;
         const fx = this.toX(rx), fy = this.toY(ry);
-        ctx.strokeStyle = "rgba(52,211,153,0.55)";
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.55;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
@@ -945,6 +950,7 @@ export class Renderer {
         ctx.lineTo(fx, fy);
         ctx.stroke();
         ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
         // pole
         ctx.strokeStyle = "#e6edf3";
         ctx.lineWidth = 2;
@@ -953,7 +959,7 @@ export class Renderer {
         ctx.lineTo(fx, fy - z * 0.9);
         ctx.stroke();
         // pennant
-        ctx.fillStyle = "#34d399";
+        ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(fx, fy - z * 0.9);
         ctx.lineTo(fx + z * 0.5, fy - z * 0.74);
@@ -961,7 +967,7 @@ export class Renderer {
         ctx.closePath();
         ctx.fill();
         // base dot
-        ctx.fillStyle = "rgba(52,211,153,0.9)";
+        ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
         ctx.fill();

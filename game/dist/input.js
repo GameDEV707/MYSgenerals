@@ -5,7 +5,7 @@ export class InputController {
     constructor(r, world, audio, opts) {
         this.pendingAbility = -1; // -1 none, 0..3 slot awaiting target
         this.pendingAttackMove = false;
-        this.pendingRally = false; // armed by the HUD "Flag" button — next map click sets the rally point
+        this.pendingRallySlot = -1; // armed by a HUD "Flag" button; -1 none, 0 = primary flag (miners/general), 1 = engineer flag
         this.paused = false;
         // pointer-type this controller listens to (spec §21.2). null = any (single-player).
         this.pointerType = null;
@@ -112,9 +112,9 @@ export class InputController {
             this.updatePointerHint();
             return;
         }
-        if (this.pendingRally) {
-            this.setRallyAt(w.x, w.y);
-            this.pendingRally = false;
+        if (this.pendingRallySlot >= 0) {
+            this.setRallyAt(w.x, w.y, this.pendingRallySlot);
+            this.pendingRallySlot = -1;
             this.updatePointerHint();
             return;
         }
@@ -335,26 +335,26 @@ export class InputController {
         }
         return ids;
     }
-    // Set the rally "flag" for every selected own building (HQ / Barracks / War Factory). Workers idle
-    // there when they have no job; produced combat units / healers gather there.
-    setRallyAt(wx, wy) {
+    // Set a rally "flag" for every selected own building. `slot` 0 = primary flag (HQ miners flag /
+    // a producer's general rally), 1 = the HQ engineer flag. Workers/units gather at their flag.
+    setRallyAt(wx, wy, slot) {
         let any = false;
         for (const id of this.r.selection) {
             const e = this.world.byId.get(id);
             if (e && e.owner === this.world.me && e.kind === "building") {
-                this.world.send({ t: "rally", building: e.id, x: wx, y: wy });
+                this.world.send({ t: "rally", building: e.id, x: wx, y: wy, slot });
                 any = true;
             }
         }
         if (any) {
             this.audio.play("click");
-            this.r.fx.addCmdMarker(wx, wy, "move", "#34d399");
+            this.r.fx.addCmdMarker(wx, wy, "move", slot === 1 ? "#38bdf8" : "#34d399");
         }
     }
     setPlacing(b) {
         this.r.placing = b ? { building: b } : null;
         this.pendingAbility = -1;
-        this.pendingRally = false;
+        this.pendingRallySlot = -1;
     }
     setAbility(slot) {
         const hero = this.heroEntity();
@@ -372,7 +372,7 @@ export class InputController {
         else {
             this.pendingAbility = slot;
             this.r.placing = null;
-            this.pendingRally = false;
+            this.pendingRallySlot = -1;
         }
     }
     heroEntity() {
@@ -460,9 +460,9 @@ export class InputController {
             this.castPending(w.x, w.y);
             return;
         }
-        if (this.pendingRally) {
-            this.setRallyAt(w.x, w.y);
-            this.pendingRally = false;
+        if (this.pendingRallySlot >= 0) {
+            this.setRallyAt(w.x, w.y, this.pendingRallySlot);
+            this.pendingRallySlot = -1;
             return;
         }
         if (this.pendingAttackMove) {
@@ -557,7 +557,7 @@ export class InputController {
             this.r.placing = null;
             this.pendingAbility = -1;
             this.pendingAttackMove = false;
-            this.pendingRally = false;
+            this.pendingRallySlot = -1;
             this.onCategoryCancel?.();
             this.cancelCursorSelect();
             return;

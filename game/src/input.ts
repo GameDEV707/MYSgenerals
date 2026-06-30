@@ -23,7 +23,7 @@ export class InputController {
   r: Renderer; world: WorldView; audio: AudioManager;
   pendingAbility = -1; // -1 none, 0..3 slot awaiting target
   pendingAttackMove = false;
-  pendingRally = false; // armed by the HUD "Flag" button — next map click sets the rally point
+  pendingRallySlot = -1; // armed by a HUD "Flag" button; -1 none, 0 = primary flag (miners/general), 1 = engineer flag
   paused = false;
   // pointer-type this controller listens to (spec §21.2). null = any (single-player).
   pointerType: "mouse" | "touch" | null = null;
@@ -124,7 +124,7 @@ export class InputController {
       if (units.length) { this.world.send({ t: "attackmove", ids: units, x: w.x, y: w.y }); this.audio.play("click"); this.r.fx.addCmdMarker(w.x, w.y, "attack", "#ffa726"); }
       this.pendingAttackMove = false; this.updatePointerHint(); return;
     }
-    if (this.pendingRally) { this.setRallyAt(w.x, w.y); this.pendingRally = false; this.updatePointerHint(); return; }
+    if (this.pendingRallySlot >= 0) { this.setRallyAt(w.x, w.y, this.pendingRallySlot); this.pendingRallySlot = -1; this.updatePointerHint(); return; }
     if (this.r.placing) { this.placeBuilding(w.x, w.y); this.updatePointerHint(); return; }
     if (this.pendingAbility >= 0) { this.castPending(w.x, w.y); this.updatePointerHint(); return; }
     this.dragStart = { x: e.clientX, y: e.clientY }; this.dragging = false; this.gestured = false;
@@ -273,19 +273,19 @@ export class InputController {
     return ids;
   }
 
-  // Set the rally "flag" for every selected own building (HQ / Barracks / War Factory). Workers idle
-  // there when they have no job; produced combat units / healers gather there.
-  private setRallyAt(wx: number, wy: number): void {
+  // Set a rally "flag" for every selected own building. `slot` 0 = primary flag (HQ miners flag /
+  // a producer's general rally), 1 = the HQ engineer flag. Workers/units gather at their flag.
+  private setRallyAt(wx: number, wy: number, slot: number): void {
     let any = false;
     for (const id of this.r.selection) {
       const e = this.world.byId.get(id);
-      if (e && e.owner === this.world.me && e.kind === "building") { this.world.send({ t: "rally", building: e.id, x: wx, y: wy }); any = true; }
+      if (e && e.owner === this.world.me && e.kind === "building") { this.world.send({ t: "rally", building: e.id, x: wx, y: wy, slot }); any = true; }
     }
-    if (any) { this.audio.play("click"); this.r.fx.addCmdMarker(wx, wy, "move", "#34d399"); }
+    if (any) { this.audio.play("click"); this.r.fx.addCmdMarker(wx, wy, "move", slot === 1 ? "#38bdf8" : "#34d399"); }
   }
 
   setPlacing(b: BuildingId | null): void {
-    this.r.placing = b ? { building: b } : null; this.pendingAbility = -1; this.pendingRally = false;
+    this.r.placing = b ? { building: b } : null; this.pendingAbility = -1; this.pendingRallySlot = -1;
   }
   setAbility(slot: number): void {
     const hero = this.heroEntity(); if (!hero || !hero.hero) return;
@@ -293,7 +293,7 @@ export class InputController {
     if (slot === 0) {
       this.world.send({ t: "ability", hero: hero.id, slot, x: hero.pos.x, y: hero.pos.y });
       this.audio.play("ability"); this.pendingAbility = -1;
-    } else { this.pendingAbility = slot; this.r.placing = null; this.pendingRally = false; }
+    } else { this.pendingAbility = slot; this.r.placing = null; this.pendingRallySlot = -1; }
   }
 
   private heroEntity(): ViewEntity | undefined {
@@ -353,7 +353,7 @@ export class InputController {
     const w = this.r.screenToWorld(sx, sy);
     if (this.r.placing) { this.placeBuilding(w.x, w.y); return; }
     if (this.pendingAbility >= 0) { this.castPending(w.x, w.y); return; }
-    if (this.pendingRally) { this.setRallyAt(w.x, w.y); this.pendingRally = false; return; }
+    if (this.pendingRallySlot >= 0) { this.setRallyAt(w.x, w.y, this.pendingRallySlot); this.pendingRallySlot = -1; return; }
     if (this.pendingAttackMove) {
       const units = this.ownUnits();
       if (units.length) { this.world.send({ t: "attackmove", ids: units, x: w.x, y: w.y }); this.audio.play("click"); this.r.fx.addCmdMarker(w.x, w.y, "attack", "#ffa726"); }
@@ -424,7 +424,7 @@ export class InputController {
     const k = normalizeKey(e);
     this.keys.add(k);
     if (k === "escape") {
-      this.r.placing = null; this.pendingAbility = -1; this.pendingAttackMove = false; this.pendingRally = false;
+      this.r.placing = null; this.pendingAbility = -1; this.pendingAttackMove = false; this.pendingRallySlot = -1;
       this.onCategoryCancel?.();
       this.cancelCursorSelect();
       return;

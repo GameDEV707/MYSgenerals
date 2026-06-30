@@ -74,6 +74,9 @@ export class Entity {
   buildTotal = 0;
   queue: QueueItem[] = [];
   rally: Vec2 | null = null;
+  // Command Center has a SECOND rally flag: `rally` governs where idle Miners gather, `rally2` where
+  // idle Engineers gather (other producers use only `rally`).
+  rally2: Vec2 | null = null;
   // T26: factory upgrades — parallel build bays (1..MAX_BAYS) and assembly-speed level (0..MAX_SPEED_LEVEL).
   bays = 1;
   speedLevel = 0;
@@ -141,7 +144,7 @@ export type Command =
   | { t: "upgradeBuilding"; building: number; kind: "bay" | "speed" | "level" }
   | { t: "research"; building: number; id: string }
   | { t: "cancelResearch"; building: number }
-  | { t: "rally"; building: number; x: number; y: number }
+  | { t: "rally"; building: number; x: number; y: number; slot?: number }
   | { t: "capture"; ids: number[]; target: number }
   | { t: "ability"; hero: number; slot: number; x: number; y: number; target?: number }
   | { t: "sell"; building: number }
@@ -334,7 +337,7 @@ export class World {
       case "upgradeBuilding": this.tryUpgradeBuilding(cmd.building, cmd.kind); break;
       case "research": this.tryResearch(cmd.building, cmd.id); break;
       case "cancelResearch": this.cancelResearch(cmd.building); break;
-      case "rally": { const b = this.byId.get(cmd.building); if (b) b.rally = { x: cmd.x, y: cmd.y }; break; }
+      case "rally": { const b = this.byId.get(cmd.building); if (b) { if (cmd.slot === 1) b.rally2 = { x: cmd.x, y: cmd.y }; else b.rally = { x: cmd.x, y: cmd.y }; } break; }
       case "capture": {
         const tgt = this.byId.get(cmd.target); if (!tgt) break;
         for (const id of cmd.ids) {
@@ -722,9 +725,11 @@ export class World {
     const u = this.spawn("unit", unit, b.owner, free.x, free.y);
     this.players[b.owner].unitsBuilt++;
     // A Miner always goes to work a free mine on spawn (the rally "flag" only governs where it idles
-    // when there is NO free mine — handled in idleWorkerSystem). Every other unit honours the
-    // building's rally flag: combat units / healers gather there; without a flag they stay put.
+    // when there is NO free mine — handled in idleWorkerSystem). The Engineer is routed to its OWN
+    // flag (rally2) by idleWorkerSystem. Every other unit honours the building's rally flag: combat
+    // units / healers gather there; without a flag they stay put.
     if (unit === "miner") this.autoAssignMiner(u);
+    else if (unit === "engineer") { /* idleWorkerSystem routes idle engineers to the engineer flag */ }
     else if (b.rally) this.setMove(u, b.rally.x, b.rally.y);
     this.events.push({ e: "toast", key: "toast.unitReadyNamed", kind: "ok", params: { unit: UNIT_DEFS[unit].nameKey }, to: b.owner });
   }
@@ -909,9 +914,10 @@ export class World {
     return best;
   }
 
-  // ---------- idle workers: gather at the Command Center's rally "flag" (or near the CC) ----------
-  // A Miner with no free mine to work, or an Engineer with no build/capture task, walks to the
-  // owner's Command Center rally point if a flag is set, otherwise loiters around the Command Center.
+  // ---------- idle workers: gather at the Command Center's rally "flags" (or near the CC) ----------
+  // The Command Center has TWO flags: a Miner with no free mine walks to the MINER flag (`rally`),
+  // an Engineer with no build/capture task walks to the ENGINEER flag (`rally2`). With no flag set
+  // for that job, the worker loiters around the Command Center.
   private idleWorkerSystem(): void {
     for (const e of this.entities) {
       if (e.dead || e.kind !== "unit") continue;
@@ -920,8 +926,9 @@ export class World {
       if (e.type === "engineer" && (e.buildTask || e.captureTask)) continue;
       if (e.path.length > 0 || e.moveTarget != null) continue; // already moving / tasked
       const cc = this.ownerCC(e.owner); if (!cc) continue;
-      const dest = cc.rally ?? cc.pos;
-      const arriveR = cc.rally ? 2.5 : cc.radius + 3;
+      const flag = e.type === "miner" ? cc.rally : cc.rally2;
+      const dest = flag ?? cc.pos;
+      const arriveR = flag ? 2.5 : cc.radius + 3;
       if (this.dist(e.pos, dest) > arriveR) this.setMove(e, dest.x, dest.y);
     }
   }

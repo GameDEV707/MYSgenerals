@@ -35,6 +35,7 @@ export class ViewEntity {
   captureProgress = 0; captureOwner = NEUTRAL;
   queue: { unit: string; progress: number; time: number }[] = [];
   rally: Vec2 | null = null;
+  rally2: Vec2 | null = null;     // Command Center's engineer flag
   bays = 1;                // T26 (own producing buildings)
   speedLevel = 0;          // T26 (own producing buildings)
   researching: { id: string; progress: number; time: number } | null = null; // T26 (own research center)
@@ -197,6 +198,7 @@ export class WorldView {
     ve.captureProgress = es.cp ?? 0; ve.captureOwner = es.co ?? NEUTRAL;
     ve.queue = es.q ?? [];
     ve.rally = es.ral ? { x: es.ral[0], y: es.ral[1] } : null;
+    ve.rally2 = es.ral2 ? { x: es.ral2[0], y: es.ral2[1] } : null;
     ve.bays = es.bay ?? 1;
     ve.speedLevel = es.spd ?? 0;
     ve.researching = es.rs ? { id: es.rs.id, progress: es.rs.progress, time: es.rs.time } : null;

@@ -25,6 +25,7 @@ export class ViewEntity {
         this.captureOwner = NEUTRAL;
         this.queue = [];
         this.rally = null;
+        this.rally2 = null; // Command Center's engineer flag
         this.bays = 1; // T26 (own producing buildings)
         this.speedLevel = 0; // T26 (own producing buildings)
         this.researching = null; // T26 (own research center)
@@ -200,6 +201,7 @@ export class WorldView {
         ve.captureOwner = es.co ?? NEUTRAL;
         ve.queue = es.q ?? [];
         ve.rally = es.ral ? { x: es.ral[0], y: es.ral[1] } : null;
+        ve.rally2 = es.ral2 ? { x: es.ral2[0], y: es.ral2[1] } : null;
         ve.bays = es.bay ?? 1;
         ve.speedLevel = es.spd ?? 0;
         ve.researching = es.rs ? { id: es.rs.id, progress: es.rs.progress, time: es.rs.time } : null;

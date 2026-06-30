@@ -39,6 +39,7 @@ export interface EntitySnap {
   // own-entity-only extras (never leaked for enemies):
   q?: { unit: string; progress: number; time: number }[]; // production queue
   ral?: [number, number];                                  // rally point
+  ral2?: [number, number];                                 // 2nd rally point (Command Center engineer flag)
   bay?: number;                                            // T26: parallel build bays (producer)
   spd?: number;                                            // T26: assembly-speed level (producer)
   rs?: { id: string; progress: number; time: number };     // T26: active research (research center)

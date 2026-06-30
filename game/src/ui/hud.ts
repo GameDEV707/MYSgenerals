@@ -210,7 +210,7 @@ export class HUD {
     // rebuilds when the CC levels up or a tower upgrade completes/starts.
     let sig = own.map((e) => e.id + e.type + ":" + e.level + (e.upgrading ? "U" + e.upgrading.to : "")).join(",")
       + "|" + this.tab + "|" + kb + (builder ? "b" : "") + "|F" + this.catFocus + "|BL" + this.baseLevel();
-    if (prod) sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".") + ":R" + (prod.rally ? Math.floor(prod.rally.x) + "," + Math.floor(prod.rally.y) : "-");
+    if (prod) sig += "|P" + prod.id + ":" + prod.bays + ":" + prod.speedLevel + ":" + prod.queue.map((q) => q.unit).join(".") + ":R" + (prod.rally ? Math.floor(prod.rally.x) + "," + Math.floor(prod.rally.y) : "-") + ":R2" + (prod.rally2 ? Math.floor(prod.rally2.x) + "," + Math.floor(prod.rally2.y) : "-");
     if (research) { const r = this.me().research; sig += "|R" + research.id + ":" + (research.researching ? "act" + research.researching.id : "idle") + ":" + r.weapons + r.armor + r.factoryTech + (r.logistics ? 1 : 0); }
     if (onlyMiners) sig += "|MN" + this.assignableMines().map((m) => m.id + (m.mineEta?.resource ?? "")).join(".");
     panel.style.display = this.layout.commands?.hidden ? "none" : ""; // restore after placement ends
@@ -327,19 +327,26 @@ export class HUD {
     const upBtns = this.upgradeBtns(prod);
     // T30 Part A: the Command Center also carries its level-upgrade button (unlocks the build tree).
     const lvlBtn = prod.type === "command_center" ? this.levelUpBtn(prod, MAX_BASE_LEVEL) : "";
-    // Flag (rally) button — arms flag placement; new units gather there, idle HQ workers idle there.
-    const flagBtn = this.flagBtn();
-    const rallyTxt = prod.rally ? `✓ (${Math.floor(prod.rally.x)}, ${Math.floor(prod.rally.y)})` : "—";
-    return `<h4>${t(def.nameKey)} — ${t("cat.train")}${prod.type === "command_center" ? ` · ${t("hud.level", { n: prod.level })}` : ""}</h4>
-      <div class="grid">${trainBtns}${upBtns}${lvlBtn}${flagBtn}</div>
-      <div class="qrow"><span class="dimtxt">${t("cmd.rally")}: ${rallyTxt}</span></div>
+    const isCC = prod.type === "command_center";
+    const coord = (v: { x: number; y: number } | null) => v ? `✓ (${Math.floor(v.x)}, ${Math.floor(v.y)})` : "—";
+    // The Command Center has TWO flags: one for Miners, one for Engineers. Other producers keep one.
+    const flagBtns = isCC
+      ? this.flagBtn(0, "cmd.flagMiners") + this.flagBtn(1, "cmd.flagEngineers")
+      : this.flagBtn(0, "cmd.flag");
+    const rallyRow = isCC
+      ? `<div class="qrow"><span class="dimtxt">🚩 ${t("units.miner.name")}: ${coord(prod.rally)} · ${t("units.engineer.name")}: ${coord(prod.rally2)}</span></div>`
+      : `<div class="qrow"><span class="dimtxt">${t("cmd.rally")}: ${coord(prod.rally)}</span></div>`;
+    return `<h4>${t(def.nameKey)} — ${t("cat.train")}${isCC ? ` · ${t("hud.level", { n: prod.level })}` : ""}</h4>
+      <div class="grid">${trainBtns}${upBtns}${lvlBtn}${flagBtns}</div>
+      ${rallyRow}
       ${this.queueStripHtml(prod)}`;
   }
 
-  // The Flag button: clicking it arms flag-placement (next map click sets the rally point).
-  private flagBtn(): string {
-    return `<div class="cmd gridbtn" data-act="rally" title="${t("cmd.flagHint")}">
-      <span class="ic">🚩</span><span>${t("cmd.flag")}</span></div>`;
+  // The Flag button: clicking it arms flag-placement (next map click sets that rally point). `slot`
+  // 0 = primary/miner flag, 1 = the Command Center's engineer flag.
+  private flagBtn(slot: number, labelKey: string): string {
+    return `<div class="cmd gridbtn" data-act="rally" data-slot="${slot}" title="${t("cmd.flagHint")}">
+      <span class="ic">🚩</span><span>${t(labelKey)}</span></div>`;
   }
 
   // The Radar panel: a level-upgrade button (reveal radius grows per level), a radius readout + Sell.
@@ -523,7 +530,7 @@ export class HUD {
       this.input.setPlacing(el.dataset.b as BuildingId); this.audio.play("click"); return;
     }
     if (act === "train") { this.input.trainFromSelection(el.dataset.u as UnitId); this.audio.play("click"); return; }
-    if (act === "rally") { this.input.pendingRally = true; this.audio.play("click"); return; }
+    if (act === "rally") { this.input.pendingRallySlot = parseInt(el.dataset.slot || "0", 10); this.audio.play("click"); return; }
     if (act === "mineassign") {
       const mineId = parseInt(el.dataset.mine || "0", 10);
       const miners = this.selectedEntities().filter((e) => e.owner === me && e.type === "miner").map((e) => e.id);

@@ -197,6 +197,8 @@ const en: Dict = {
   "units.medic.name": "Medic",
   "buildings.radar.name": "Radar",
   "cmd.flag": "Flag",
+  "cmd.flagMiners": "Flag: Miners",
+  "cmd.flagEngineers": "Flag: Engineers",
   "cmd.flagHint": "Set a rally flag — idle HQ workers and new units gather there",
   "hud.radarRange": "Detection radius {n}",
 
@@ -516,6 +518,8 @@ const ru: Dict = {
   "units.medic.name": "Медик",
   "buildings.radar.name": "Радар",
   "cmd.flag": "Знамя сбора",
+  "cmd.flagMiners": "Знамя: Шахтёры",
+  "cmd.flagEngineers": "Знамя: Инженеры",
   "cmd.flagHint": "Поставить знамя сбора — там собираются простаивающие рабочие штаба и новые юниты",
   "hud.radarRange": "Радиус обнаружения {n}",
 
@@ -835,6 +839,8 @@ const uz: Dict = {
   "units.medic.name": "Shifokor",
   "buildings.radar.name": "Radar",
   "cmd.flag": "Bayroq",
+  "cmd.flagMiners": "Bayroq: Konchilar",
+  "cmd.flagEngineers": "Bayroq: Muhandislar",
   "cmd.flagHint": "Bayroq qoʻyish — boʻsh shtab ishchilari va yangi birliklar shu yerda yigʻiladi",
   "hud.radarRange": "Aniqlash radiusi {n}",
 

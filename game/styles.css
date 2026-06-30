@@ -301,8 +301,11 @@ select, input {
 @keyframes slide-in { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
 /* end screen */
+/* The end screen is appended to the (pointer-events:none) hud-root, so it must explicitly re-enable
+   pointer events or its Rematch/Quit buttons are unclickable. A high z-index keeps it above the HUD
+   widgets + edit bar. (Without this the mouse player could not press any button after a win/loss.) */
 .endscreen { position: absolute; inset: 0; display:flex; flex-direction: column; align-items:center; justify-content:center;
-  background: rgba(5,8,12,0.85); animation: fade-in .4s; }
+  background: rgba(5,8,12,0.85); animation: fade-in .4s; pointer-events: auto; z-index: 70; cursor: default; }
 .endscreen .banner { font-size: 72px; font-weight: 800; animation: scale-in .5s ease; }
 .endscreen .banner.win { color: var(--gold); text-shadow: 0 0 30px rgba(255,210,63,0.6); }
 .endscreen .banner.lose { color: var(--danger); text-shadow: 0 0 30px rgba(239,68,68,0.5); }

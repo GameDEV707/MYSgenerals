@@ -55,6 +55,11 @@ export class Renderer {
         // Player 1's keyboard-driven on-screen cursor (spec §24/T24) — drawn so the screen shows TWO
         // cursors (this one for the keyboard player + Player 2's native OS mouse cursor).
         this.virtualCursor = null;
+        // Split-screen MOUSE player's cursor — a custom crosshair CLAMPED to this viewport half (the
+        // native OS cursor is hidden in split mode). Drawing our own confined cursor is what keeps the
+        // mouse player's pointer from straying into the other player's half. null in single-player (the
+        // native crosshair is used) and cleared on game over (the real OS cursor returns).
+        this.mouseCursor = null;
         this.showFog = true;
         this.fullWindow = true;
         // T27 Part B: reused overlay-slot scratch (avoids a per-frame allocation per entity).
@@ -187,6 +192,8 @@ export class Renderer {
             this.drawPointerHint();
         if (this.virtualCursor)
             this.drawVirtualCursor();
+        if (this.mouseCursor)
+            this.drawMouseCursor();
         ctx.restore();
         this.fx.drawFlash(ctx, window.innerWidth, window.innerHeight);
     }
@@ -245,6 +252,38 @@ export class Renderer {
         ctx.strokeStyle = "#04140d";
         ctx.lineWidth = 1.4;
         ctx.stroke();
+        ctx.restore();
+    }
+    // Split-screen mouse player's confined cursor: a crosshair (replacing the hidden native crosshair)
+    // drawn at the clamped position. It is rendered inside this viewport's clip, so together with the
+    // clamp in the input controller it can never appear in the other player's half.
+    drawMouseCursor() {
+        if (!this.mouseCursor)
+            return;
+        const ctx = this.ctx;
+        const x = this.mouseCursor.x, y = this.mouseCursor.y;
+        const g = 4, len = 11;
+        const stroke = (w, color) => {
+            ctx.lineWidth = w;
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(x - len, y);
+            ctx.lineTo(x - g, y);
+            ctx.moveTo(x + g, y);
+            ctx.lineTo(x + len, y);
+            ctx.moveTo(x, y - len);
+            ctx.lineTo(x, y - g);
+            ctx.moveTo(x, y + g);
+            ctx.lineTo(x, y + len);
+            ctx.stroke();
+        };
+        ctx.save();
+        stroke(3.5, "rgba(0,0,0,0.55)"); // dark outline for contrast on light terrain
+        stroke(1.5, "rgba(255,255,255,0.96)"); // bright crosshair
+        ctx.fillStyle = "rgba(255,255,255,0.96)";
+        ctx.beginPath();
+        ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+        ctx.fill();
         ctx.restore();
     }
     drawTerrain() {

@@ -115,6 +115,11 @@ export class MatchSession {
     // prime one snapshot so the first frame has state, then center each camera on its base
     this.host.step();
     for (const b of this.bundles) this.bundles.length && b.renderer.centerOn(map.spawns[b.playerId].x, map.spawns[b.playerId].y);
+    // T34: seed the split-screen mouse player's confined cursor at its viewport centre so it is
+    // visible immediately (the native cursor is hidden in split mode — see the loop below).
+    for (const b of this.bundles) {
+      if (b.input.control === "p2-mouse") b.renderer.mouseCursor = { x: b.renderer.vx + b.renderer.W / 2, y: b.renderer.vy + b.renderer.H / 2 };
+    }
 
     window.addEventListener("resize", this.resizeHandler);
     this.running = true; this.last = performance.now(); this.acc = 0;
@@ -145,6 +150,13 @@ export class MatchSession {
       let steps = 0;
       while (this.acc >= TICK_DT && steps < 6) { this.host.step(); this.acc -= TICK_DT; steps++; }
     }
+    // T34: cursor management. While a split-screen match is running the native OS cursor is hidden
+    // (each mouse player draws its own confined crosshair). When the game ends we restore the real
+    // OS cursor (default arrow) and drop the custom cursors so the win/lose screen is navigable.
+    const over = this.host.world.winner !== -2;
+    const split = this.cfg.split && this.bundles.length >= 2;
+    this.canvas.style.cursor = over ? "default" : (split ? "none" : "crosshair");
+    if (over) for (const b of this.bundles) b.renderer.mouseCursor = null;
     // clear whole backing store once (renderers clip to their viewports)
     const ctx = this.canvas.getContext("2d")!;
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); ctx.restore();
@@ -198,5 +210,5 @@ export class MatchSession {
 
   private rematch(): void { this.stop(); this.overlay.innerHTML = ""; this.start(this.cfg); }
   quit(): void { this.stop(); this.overlay.innerHTML = ""; const ctx = this.canvas.getContext("2d")!; ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); this.cfg.onQuit(); }
-  stop(): void { this.running = false; cancelAnimationFrame(this.raf); window.removeEventListener("resize", this.resizeHandler); }
+  stop(): void { this.running = false; cancelAnimationFrame(this.raf); window.removeEventListener("resize", this.resizeHandler); this.canvas.style.cursor = ""; }
 }

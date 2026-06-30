@@ -58,6 +58,10 @@ export class InputController {
         canvas.style.touchAction = "none";
     }
     matchesType(e) { return !this.pointerType || e.pointerType === this.pointerType; }
+    // T34: the split-screen MOUSE player (p2-mouse) confines its cursor to its own viewport half — the
+    // native cursor is hidden and we draw a custom crosshair clamped to this renderer's viewport, so
+    // the pointer can never wander into the other player's side. (No confinement in single-player.)
+    confined() { return this.control === "p2-mouse"; }
     // A pointer-DOWN is accepted only inside this controller's viewport AND for its pointer type.
     // The keyboard player (P1) never accepts the mouse — the mouse belongs entirely to Player 2.
     acceptsPointer(e) { return this.control !== "p1-keyboard" && this.matchesType(e) && this.r.contains(e.clientX, e.clientY); }
@@ -134,8 +138,21 @@ export class InputController {
         const owns = this.ptr.has(e.pointerId);
         if (owns)
             this.ptr.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        if (this.r.contains(e.clientX, e.clientY))
+        // T34: confine the mouse player's cursor to its viewport half. We clamp the on-screen cursor and
+        // the world-pointer to this renderer's rectangle so they never cross the split divider. While the
+        // game is over the custom cursor is dropped and the real OS cursor is restored (see MatchSession).
+        if (this.confined()) {
+            const over = this.world.winner !== -2;
+            const px = Math.max(this.r.vx, Math.min(this.r.vx + this.r.W - 1, e.clientX));
+            const py = Math.max(this.r.vy, Math.min(this.r.vy + this.r.H - 1, e.clientY));
+            this._mx = px;
+            this._my = py;
+            this.r.mouseWorld = this.r.screenToWorld(px, py);
+            this.r.mouseCursor = over ? null : { x: px, y: py };
+        }
+        else if (this.r.contains(e.clientX, e.clientY)) {
             this.r.mouseWorld = this.r.screenToWorld(e.clientX, e.clientY);
+        }
         // Two-finger gesture (touch pan + pinch-zoom) takes precedence over single-pointer handling.
         if (this.gesture && this.ptr.size >= 2) {
             this.updateGesture();
@@ -150,8 +167,14 @@ export class InputController {
         }
         if (this.dragStart && Math.hypot(e.clientX - this.dragStart.x, e.clientY - this.dragStart.y) > 6)
             this.dragging = true;
-        this._mx = e.clientX;
-        this._my = e.clientY;
+        if (this.confined()) {
+            this._mx = Math.max(this.r.vx, Math.min(this.r.vx + this.r.W - 1, e.clientX));
+            this._my = Math.max(this.r.vy, Math.min(this.r.vy + this.r.H - 1, e.clientY));
+        }
+        else {
+            this._mx = e.clientX;
+            this._my = e.clientY;
+        }
         this.updatePointerHint();
     }
     onPointerUp(e) {

@@ -324,6 +324,38 @@ export class World {
     if (pa && pb && pa.team >= 0 && pa.team === pb.team) return false;
     return true;
   }
+
+  // ---------- custom-team shared economy (spec §24) ----------
+  // Two owners are on the SAME side (custom-team allies). Classic free-for-all (team < 0) → true only
+  // for the same player, so all team-aware paths collapse to the original single-player behaviour.
+  sameTeam(a: number, b: number): boolean {
+    if (a === b) return true;
+    const pa = this.players[a], pb = this.players[b];
+    return !!pa && !!pb && pa.team >= 0 && pa.team === pb.team;
+  }
+  // The id of the player that holds the side's SHARED economy — the "bank". It is the lowest-id member
+  // that owns a Command Center, else the lowest-id member of the side. In team mode a whole side pools
+  // resources, power, research and brownout into this one player, which is EXACTLY the player the HUD
+  // shows every teammate (MatchHost.economyOwner / WorldView.economyOwner resolve identically). So a
+  // teammate mining, capturing a derrick/outpost, building or researching all feed/charge the ONE
+  // shared balance. In classic (team < 0) the bank is the player itself → every economy path unchanged.
+  economyOwnerId(owner: number): number {
+    const p = this.players[owner];
+    if (!p || !(p.team >= 0)) return owner; // classic / no team (undefined or -1) → the player itself
+    let cc = -1, low = -1;
+    for (const q of this.players) {
+      if (q.team !== p.team) continue;
+      if (low < 0 || q.id < low) low = q.id;
+    }
+    for (const e of this.entities) {
+      if (e.dead || e.type !== "command_center") continue;
+      const op = this.players[e.owner];
+      if (op && op.team === p.team && (cc < 0 || op.id < cc)) cc = op.id;
+    }
+    return cc >= 0 ? cc : (low >= 0 ? low : owner);
+  }
+  // The PlayerState that holds the side's shared economy (see economyOwnerId).
+  bank(owner: number): PlayerState { return this.players[this.economyOwnerId(owner)] ?? this.players[owner]; }
   armorOf(e: Entity): ArmorType {
     if (e.kind === "building" || e.kind === "neutral") return "StructureArmored";
     return UNIT_DEFS[e.type as UnitId].armor;
@@ -422,40 +454,45 @@ export class World {
   }
 
   tryBuild(cmd: Extract<Command, { t: "build" }>): void {
-    const p = this.players[cmd.owner]; if (!p) return;
+    // Custom-team co-op: a build is charged to AND owned by the side's shared base owner (the bank),
+    // so every teammate builds into the ONE team base from the ONE shared balance. (The team-aware
+    // client + host.sanitize already coerce this for humans; resolving here too covers AI teammates
+    // and any direct issue.) Classic (team < 0) resolves to the player themselves → unchanged.
+    const owner = this.economyOwnerId(cmd.owner);
+    const p = this.players[owner]; if (!p) return;
     const def = BUILDING_DEFS[cmd.building];
-    if (!this.canAfford(p, def.cost)) { this.events.push({ e: "toast", key: this.shortfallKey(p, def.cost), kind: "danger", to: cmd.owner }); return; }
-    if (def.requires && !this.entities.some((e) => e.owner === cmd.owner && e.type === def.requires && !e.constructing)) {
-      this.events.push({ e: "toast", key: "errors.needBuilding", kind: "danger", params: { b: BUILDING_DEFS[def.requires].nameKey }, to: cmd.owner }); return;
+    if (!this.canAfford(p, def.cost)) { this.events.push({ e: "toast", key: this.shortfallKey(p, def.cost), kind: "danger", to: owner }); return; }
+    if (def.requires && !this.entities.some((e) => this.sameTeam(e.owner, owner) && e.type === def.requires && !e.constructing)) {
+      this.events.push({ e: "toast", key: "errors.needBuilding", kind: "danger", params: { b: BUILDING_DEFS[def.requires].nameKey }, to: owner }); return;
     }
     // T30 Part A: the Command Center level gates the build tree (Barracks/Cannon need L2, War
     // Factory/Rocket need L3). Reject authoritatively with a clear toast naming the required level.
     const reqLvl = REQUIRED_BASE_LEVEL[cmd.building] ?? 1;
-    if (reqLvl > 1 && this.maxBaseLevel(cmd.owner) < reqLvl) {
-      this.events.push({ e: "toast", key: "errors.needBaseLevel", kind: "danger", params: { lvl: reqLvl }, to: cmd.owner }); return;
+    if (reqLvl > 1 && this.maxBaseLevel(owner) < reqLvl) {
+      this.events.push({ e: "toast", key: "errors.needBaseLevel", kind: "danger", params: { lvl: reqLvl }, to: owner }); return;
     }
-    if (!this.placementValid(cmd.owner, cmd.building, cmd.x, cmd.y)) {
-      this.events.push({ e: "toast", key: "errors.invalidPlacement", kind: "danger", to: cmd.owner }); return;
+    if (!this.placementValid(owner, cmd.building, cmd.x, cmd.y)) {
+      this.events.push({ e: "toast", key: "errors.invalidPlacement", kind: "danger", to: owner }); return;
     }
     // T28 Part B: power gate — a power-CONSUMING building cannot be started without spare
-    // generation. Count current usage + the demand of this owner's already-in-progress consumers,
+    // generation. Count current usage + the demand of the side's already-in-progress consumers,
     // so you cannot queue several builds that would collectively exceed supply. Power PRODUCERS
     // (power_plant, command_center) have def.power >= 0 and are never blocked.
     const demand = def.power < 0 ? -def.power : 0;
     if (demand > 0) {
       let committed = p.powerUse;
       for (const e of this.entities) {
-        if (!e.dead && e.kind === "building" && e.owner === cmd.owner && e.constructing && e.power < 0) committed += -e.power;
+        if (!e.dead && e.kind === "building" && this.sameTeam(e.owner, owner) && e.constructing && e.power < 0) committed += -e.power;
       }
       if (committed + demand > p.powerGen) {
-        this.events.push({ e: "toast", key: "errors.needPower", kind: "danger", to: cmd.owner }); return;
+        this.events.push({ e: "toast", key: "errors.needPower", kind: "danger", to: owner }); return;
       }
     }
     this.pay(p, def.cost);
-    const b = this.spawn("building", cmd.building, cmd.owner, cmd.x, cmd.y);
+    const b = this.spawn("building", cmd.building, owner, cmd.x, cmd.y);
     b.constructing = true; b.buildTotal = def.buildTime; b.buildProgress = 0; b.hp = Math.max(1, def.hp * 0.1);
     // T31: dispatch the nearest idle ENGINEER (builder) to construct it
-    const builder = this.nearestIdleWorker(cmd.owner, b.pos);
+    const builder = this.nearestIdleWorker(owner, b.pos);
     if (builder) { builder.buildTask = { bid: cmd.building, pos: { ...b.pos }, entId: b.id }; this.setMove(builder, b.pos.x, b.pos.y); }
     this.events.push({ e: "construct", pos: b.pos });
   }
@@ -469,9 +506,10 @@ export class World {
       if (this.grid.terrain[this.grid.idx(tx, ty)] !== 0 && this.grid.terrain[this.grid.idx(tx, ty)] !== 3) return false;
       if (this.grid.isBlocked(tx, ty)) return false;
     }
-    // build radius (spec §7.3): within BUILD_RADIUS of an owned building — OR an owned outpost
-    // (T32 Part B3: a captured outpost is a forward SUB-BASE that anchors construction around it).
-    const near = this.entities.some((e) => e.owner === owner && (e.kind === "building" || e.type === "outpost") && this.dist(e.pos, { x: x + 0.5, y: y + 0.5 }) <= BUILD_RADIUS + e.radius);
+    // build radius (spec §7.3): within BUILD_RADIUS of a building / outpost owned by the side
+    // (custom-team co-op: any ally's building anchors construction — a captured outpost is a forward
+    // SUB-BASE, T32 Part B3). `sameTeam` is owner-only in classic, so this is unchanged there.
+    const near = this.entities.some((e) => this.sameTeam(e.owner, owner) && (e.kind === "building" || e.type === "outpost") && this.dist(e.pos, { x: x + 0.5, y: y + 0.5 }) <= BUILD_RADIUS + e.radius);
     if (!near) return false;
     // iron/gold mines require a matching deposit nearby (spec §6.3)
     if (building === "iron_mine" || building === "gold_mine") {
@@ -483,11 +521,12 @@ export class World {
   }
 
   // T31: the builder is the ENGINEER (the Miner is mining-only). Find the nearest idle engineer —
-  // one not already constructing (buildTask) or capturing (captureTask).
+  // one not already constructing (buildTask) or capturing (captureTask). Custom-team co-op: ANY
+  // ally's idle engineer can raise the shared base (so both friends' builders pitch in).
   nearestIdleWorker(owner: number, pos: Vec2): Entity | null {
     let best: Entity | null = null; let bd = 1e9;
     for (const e of this.entities) {
-      if (e.owner !== owner || e.type !== "engineer" || e.dead) continue;
+      if (!this.sameTeam(e.owner, owner) || e.type !== "engineer" || e.dead) continue;
       if (e.buildTask || e.captureTask) continue; // don't pull a busy engineer
       const d = this.dist(e.pos, pos);
       if (d < bd) { bd = d; best = e; }
@@ -517,7 +556,7 @@ export class World {
 
   tryTrain(cmd: Extract<Command, { t: "train" }>): void {
     const b = this.byId.get(cmd.building); if (!b || !b.isBuilding || b.constructing) return;
-    const p = this.players[b.owner]; if (!p) return;
+    const p = this.bank(b.owner); if (!p) return;
     const def = BUILDING_DEFS[b.type as BuildingId];
     if (!def.produces || !def.produces.includes(cmd.unit)) return;
     if (b.queue.length >= MAX_QUEUE) { this.events.push({ e: "toast", key: "toast.queueFull", kind: "danger", to: b.owner }); return; }
@@ -532,7 +571,7 @@ export class World {
   cancelQueue(buildingId: number, index: number): void {
     const b = this.byId.get(buildingId); if (!b) return;
     const item = b.queue[index]; if (!item) return;
-    const p = this.players[b.owner];
+    const p = this.bank(b.owner);
     // Already-started items (any in-progress bay) refund 50%; not-yet-started items refund 100%.
     const frac = item.progress > 0 ? CANCEL_INPROGRESS_REFUND : CANCEL_QUEUED_REFUND;
     this.refund(p, UNIT_DEFS[item.unit].cost, frac);
@@ -544,7 +583,7 @@ export class World {
   tryUpgradeBuilding(buildingId: number, kind: "bay" | "speed" | "level"): void {
     const b = this.byId.get(buildingId); if (!b || !b.isBuilding || b.constructing) return;
     const def = BUILDING_DEFS[b.type as BuildingId];
-    const p = this.players[b.owner]; if (!p) return;
+    const p = this.bank(b.owner); if (!p) return;
     // T30: timed LEVEL upgrade for the Command Center (gates the tech tree) and defensive towers
     // (boost range + damage). Costs are paid up-front and the upgrade takes half the build time.
     if (kind === "level") { this.tryUpgradeLevel(b, def, p); return; }
@@ -606,7 +645,7 @@ export class World {
   tryResearch(buildingId: number, id: string): void {
     const b = this.byId.get(buildingId); if (!b || b.type !== "research_center" || b.constructing) return;
     if (b.researching) return; // slot busy
-    const p = this.players[b.owner]; if (!p) return;
+    const p = this.bank(b.owner); if (!p) return;
     const def = RESEARCH_BY_ID[id]; if (!def) return;
     if (!this.canResearch(p, def)) return;
     if (!this.canAfford(p, def.cost)) { this.events.push({ e: "toast", key: this.shortfallKey(p, def.cost), kind: "danger", to: b.owner }); return; }
@@ -616,14 +655,14 @@ export class World {
   cancelResearch(buildingId: number): void {
     const b = this.byId.get(buildingId); if (!b || b.type !== "research_center" || !b.researching) return;
     const def = RESEARCH_BY_ID[b.researching.id];
-    if (def) this.refund(this.players[b.owner], def.cost, CANCEL_INPROGRESS_REFUND);
+    if (def) this.refund(this.bank(b.owner), def.cost, CANCEL_INPROGRESS_REFUND);
     b.researching = null;
   }
   private completeResearch(b: Entity): void {
     if (!b.researching) return;
     const def = RESEARCH_BY_ID[b.researching.id]; b.researching = null;
     if (!def) return;
-    const p = this.players[b.owner]; if (!p) return;
+    const p = this.bank(b.owner); if (!p) return;
     switch (def.kind) {
       case "weapons": p.research.weapons = Math.max(p.research.weapons, def.level); break;
       case "armor": p.research.armor = Math.max(p.research.armor, def.level); break;
@@ -637,7 +676,7 @@ export class World {
   sell(buildingId: number): void {
     const b = this.byId.get(buildingId); if (!b || !b.isBuilding) return;
     if (b.type === "command_center") return;
-    const p = this.players[b.owner];
+    const p = this.bank(b.owner);
     this.refund(p, BUILDING_DEFS[b.type as BuildingId].cost, SELL_REFUND);
     this.events.push({ e: "death", pos: b.pos, kind: "building", owner: b.owner });
     this.killEntity(b, false);
@@ -701,39 +740,43 @@ export class World {
     for (const p of this.players) { p.powerGen = 0; p.powerUse = 0; }
     for (const e of this.entities) {
       if (e.kind !== "building" || e.dead || e.constructing) continue;
-      const p = this.players[e.owner]; if (!p) continue;
+      // Custom-team co-op: power is a SHARED grid — every building feeds the side's one bank.
+      const p = this.bank(e.owner); if (!p) continue;
       if (e.power > 0) p.powerGen += e.power; else p.powerUse += -e.power;
-      if (e.type === "command_center") p.powerGen += 0; // base already +5 via def power
     }
-    for (const p of this.players) p.brownout = (p.powerGen - p.powerUse) < 0;
+    // Mirror the (shared) grid onto every member so per-owner reads (towers / production / build
+    // gate) and each teammate's HUD see the side's true power state + brownout. In classic the bank
+    // is the player itself, so this is a no-op.
+    for (const p of this.players) { const b = this.bank(p.id); p.powerGen = b.powerGen; p.powerUse = b.powerUse; p.brownout = (b.powerGen - b.powerUse) < 0; }
 
     // T30: EVERY mine needs at least one miner working inside it. Silver scales with its miners
     // (up to the canonical slot cap); iron / gold / captured oil produce at their fixed canonical
-    // interval while occupied, and NOTHING when empty. `minerSlots` is the live occupancy.
+    // interval while occupied, and NOTHING when empty. `minerSlots` is the live occupancy. All yield
+    // is banked to the side's shared economy (this.bank) so a teammate's mines/derricks pay the team.
     for (const e of this.entities) {
       if (e.dead || e.constructing) continue;
       if (e.type === "silver_mine") {
         // T31: one miner works a silver mine → its single-miner rate (no multi-miner scaling).
         if (e.minerSlots > 0) {
           e.resAccum += TICK_DT / MINER_OUTPUT_INTERVAL;
-          while (e.resAccum >= 1) { e.resAccum -= 1; this.players[e.owner].silver += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" }); }
+          while (e.resAccum >= 1) { e.resAccum -= 1; this.bank(e.owner).silver += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" }); }
         }
       } else if (e.type === "iron_mine") {
         if (e.minerSlots > 0) {
           e.resAccum += TICK_DT / IRON_INTERVAL;
-          while (e.resAccum >= 1) { e.resAccum -= 1; this.players[e.owner].iron += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#8c98a4" }); }
+          while (e.resAccum >= 1) { e.resAccum -= 1; this.bank(e.owner).iron += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#8c98a4" }); }
         }
       } else if (e.type === "gold_mine") {
         if (e.minerSlots > 0) {
           e.resAccum += TICK_DT / GOLD_INTERVAL;
-          while (e.resAccum >= 1) { e.resAccum -= 1; this.players[e.owner].gold += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#ffd23f" }); }
+          while (e.resAccum >= 1) { e.resAccum -= 1; this.bank(e.owner).gold += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#ffd23f" }); }
         }
       } else if (e.type === "oil_derrick" && e.owner !== NEUTRAL) {
         // T33: a CAPTURED oil derrick is a passive income point — it pays out on its own once owned
         // (no miner walks into it). Miners are no longer routed here (see isMineType), so its yield
-        // must not be gated on `minerSlots`.
+        // must not be gated on `minerSlots`. Banked to the side so a teammate's derrick pays the team.
         e.resAccum += TICK_DT / OIL_INTERVAL;
-        while (e.resAccum >= 1) { e.resAccum -= 1; this.players[e.owner].silver += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" }); }
+        while (e.resAccum >= 1) { e.resAccum -= 1; this.bank(e.owner).silver += 1; this.events.push({ e: "float", pos: e.pos, text: "+1", color: "#c9d1d9" }); }
       }
     }
   }
@@ -1272,11 +1315,12 @@ export class World {
     let dmg = base * mult;
     // attacker veterancy bonus
     if (attacker) dmg *= RANK_DMG[attacker.rank];
-    // T26: Weapons research — attacker's army deals +15% per level.
-    const op = this.players[owner];
+    // T26: Weapons research — attacker's army deals +15% per level (custom-team: the side's shared
+    // research, so a teammate's own hero/units benefit from the team's tech, read from the bank).
+    const op = this.bank(owner);
     if (op && op.research.weapons) dmg *= 1 + RESEARCH_DAMAGE_PER_LEVEL * op.research.weapons;
     // T26: Armor research — defender's army takes less (effective +15% HP per level).
-    const dp = this.players[tgt.owner];
+    const dp = this.bank(tgt.owner);
     if (dp && dp.research.armor) dmg /= 1 + RESEARCH_ARMOR_PER_LEVEL * dp.research.armor;
     // banner armor buff on defender
     const banner = this.banners.find((b) => b.owner === tgt.owner && this.dist(b.pos, tgt.pos) <= ABIL.w.range);
@@ -1301,11 +1345,11 @@ export class World {
         this.events.push({ e: "rankup", pos: attacker.pos });
       }
     }
-    // hero xp to the owner
+    // hero xp to the owner (each player drives their OWN hero, so xp stays per-player)
     const p = this.players[owner];
     if (p && p.heroId) { const h = this.byId.get(p.heroId); if (h && h.hero) this.gainHeroXp(h, value); }
-    // bounty for hero kill
-    if (tgt.hero) { if (p) { p.silver += 30; this.events.push({ e: "float", pos: tgt.pos, text: "+30", color: "#ffd23f" }); } }
+    // bounty for hero kill → the side's shared balance (custom-team: banked, not the killer's purse)
+    if (tgt.hero) { const bk = this.bank(owner); if (bk) { bk.silver += 30; this.events.push({ e: "float", pos: tgt.pos, text: "+30", color: "#ffd23f" }); } }
     this.killEntity(tgt, true);
   }
 
@@ -1377,7 +1421,9 @@ export class World {
             const name = isOutpost ? "buildings.outpost.name" : "buildings.oilDerrick.name";
             if (e.bountyCd <= 0) {
               const bounty = isOutpost ? OUTPOST_CAPTURE_BOUNTY : 50;
-              this.players[o].silver += bounty;
+              // Custom-team co-op: the capture bonus is banked to the SIDE's shared balance, so a
+              // teammate (e.g. the 2nd player's hero) capturing a derrick/outpost credits the team.
+              this.bank(o).silver += bounty;
               this.events.push({ e: "float", pos: e.pos, text: "+" + bounty, color: "#c9d1d9" });
               e.bountyCd = 30;
             }

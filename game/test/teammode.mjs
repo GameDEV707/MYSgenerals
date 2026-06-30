@@ -129,6 +129,47 @@ const newPP = w2.entities.find((e) => e.type === "power_plant" && !e.dead);
 assert(!!newPP, "teammate's build actually places a building (was silently dropped before the fix)");
 assert(newPP && newPP.owner === 0, "the teammate's building is owned by / charged to the side's shared base owner");
 
+console.log("Teammate's captured income is BANKED to the shared balance (the reported superhero/oil bug):");
+// Fresh 2v2-style world: team 0 = players 0 (leader/base) + 1 (teammate), team 1 = player 2.
+const w3 = new World(getMap("crossfire"));
+[ [0, 0], [1, 0], [2, 1] ].forEach(([id, tm]) => w3.addPlayer(mkPlayer(id, tm)));
+w3.spawnAllBases("team");
+const leaderCC3 = w3.entities.find((e) => e.type === "command_center" && e.owner === 0);
+
+// (1) Passive oil income from a derrick the TEAMMATE captured must credit the SIDE's bank (player 0),
+//     not the teammate's separate purse. Spawn a derrick owned by player 1, one tick from a +1 payout.
+const derrick = w3.spawn("neutral", "oil_derrick", 0, Math.floor(leaderCC3.pos.x) + 8, Math.floor(leaderCC3.pos.y));
+derrick.owner = 1; derrick.resAccum = 0.999; // captured by the 2nd player; about to pay out
+const bankBefore = w3.players[0].silver, mateBefore = w3.players[1].silver;
+w3.tick(); // the leader's fresh silver mine cannot cross an integer in a single tick, so only the derrick pays
+assert(w3.players[0].silver === bankBefore + 1, "teammate's oil-derrick income is added to the SHARED balance (bank +1)");
+assert(w3.players[1].silver === mateBefore, "the teammate's own purse is NOT separately credited (one shared economy)");
+
+// (2) The capture BOUNTY also banks to the side. Isolate it: stop all mining income, then let the
+//     teammate's hero (sole unit present) capture a neutral derrick placed far from the base.
+for (const m of w3.entities) if (m.type === "silver_mine" || m.type === "iron_mine" || m.type === "gold_mine") m.minerSlots = 0;
+const hero1 = w3.entities.find((e) => e.type === "hero" && e.owner === 1);
+const capTarget = w3.spawn("neutral", "oil_derrick", 0, Math.floor(leaderCC3.pos.x) + 16, Math.floor(leaderCC3.pos.y) + 10);
+capTarget.resAccum = 0; // so the bank delta over the window is the bounty, not passive income
+hero1.pos = { x: capTarget.pos.x, y: capTarget.pos.y }; // teammate's hero stands on it (the only capturer)
+const bankBeforeCap = w3.players[0].silver, mateBeforeCap = w3.players[1].silver;
+for (let i = 0; i < 200; i++) { hero1.pos = { x: capTarget.pos.x, y: capTarget.pos.y }; w3.tick(); }
+assert(capTarget.owner === 1, "the teammate's hero captures the neutral oil derrick");
+assert(w3.players[0].silver > bankBeforeCap, "the capture BOUNTY is credited to the SHARED balance (bank)");
+assert(w3.players[1].silver === mateBeforeCap, "the capture bounty did NOT go to the capturer's own purse");
+
+console.log("Shared research applies to a teammate's own units (custom-team economy is pooled):");
+const w4 = new World(getMap("crossfire"));
+[ [0, 0], [1, 0] ].forEach(([id, tm]) => w4.addPlayer(mkPlayer(id, tm)));
+w4.spawnAllBases("team");
+// The team's research lives on the bank (player 0). The damage path reads a unit owner's SIDE
+// research via world.bank(), so a teammate's own hero/units benefit from the team's tech. Verify the
+// bank resolution every economy/combat read relies on.
+w4.players[0].research.weapons = 2; // team weapons tech, stored on the bank
+assert(w4.bank(1).id === 0, "the side's bank (shared research/economy) resolves to the base owner (player 0)");
+assert(w4.bank(1).research.weapons === 2, "a teammate's combat/economy reads see the SIDE's research level");
+assert(w4.economyOwnerId(1) === 0 && w4.economyOwnerId(0) === 0, "every member resolves to the one shared economy owner");
+
 console.log("");
 if (failures === 0) { console.log("ALL TEAM-MODE TESTS PASSED ✓"); process.exit(0); }
 else { console.error(failures + " TEAM-MODE TEST(S) FAILED ✗"); process.exit(1); }
